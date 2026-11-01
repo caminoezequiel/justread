@@ -54,10 +54,10 @@ pub enum PageEvent {
     },
 }
 
-/// Scroll requests sent to the chapter; `kind` is what `reader.js` matches on.
+/// Requests sent to the chapter; `kind` is what `reader.js` matches on.
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind")]
-enum ScrollCommand {
+enum Command {
     /// To an element id, or to the top when `fragment` is `None`.
     #[serde(rename = "scroll_to")]
     Fragment { fragment: Option<String> },
@@ -65,6 +65,9 @@ enum ScrollCommand {
     End,
     #[serde(rename = "scroll_to_fraction")]
     Fraction { fraction: f64 },
+    /// Reload the reader stylesheet; `version` makes the URL unique.
+    #[serde(rename = "restyle")]
+    Restyle { version: u64 },
 }
 
 /// Handle to the bridge script. Cloning it gives another handle to the same
@@ -79,11 +82,19 @@ impl Bridge {
 
     pub fn scroll(&self, scroll: Scroll) {
         let command = match scroll {
-            Scroll::Top => ScrollCommand::Fragment { fragment: None },
-            Scroll::Fragment(id) => ScrollCommand::Fragment { fragment: Some(id) },
-            Scroll::End => ScrollCommand::End,
-            Scroll::Fraction(fraction) => ScrollCommand::Fraction { fraction },
+            Scroll::Top => Command::Fragment { fragment: None },
+            Scroll::Fragment(id) => Command::Fragment { fragment: Some(id) },
+            Scroll::End => Command::End,
+            Scroll::Fraction(fraction) => Command::Fraction { fraction },
         };
+        self.send(command);
+    }
+
+    pub fn restyle(&self, version: u64) {
+        self.send(Command::Restyle { version });
+    }
+
+    fn send(&self, command: Command) {
         if let Err(e) = self.0.send(command) {
             eprintln!("justread: could not send to the chapter: {e}");
         }

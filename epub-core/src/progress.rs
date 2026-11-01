@@ -186,28 +186,33 @@ impl ProgressStore {
         self.data.last_opened = Some(path.to_owned());
     }
 
-    /// Write the store to disk atomically: write a temporary file next to the
-    /// real one, flush it to the disk, then rename it over the original.
-    /// A rename within one directory replaces the file in a single step.
+    /// Write the store to disk atomically (see [`write_atomic`]).
     pub fn save(&self) -> Result<(), ProgressError> {
-        let io_error = |path: &Path| {
-            let path = path.to_owned();
-            move |source| ProgressError::Io { path, source }
-        };
-        if let Some(dir) = self.file.parent() {
-            fs::create_dir_all(dir).map_err(io_error(dir))?;
-        }
         let json = serde_json::to_vec_pretty(&self.data)?;
-        let temp = sibling(&self.file, ".tmp");
-        {
-            // This block limits the file handle's lifetime: it is closed
-            // (dropped) at the closing brace, before the rename below.
-            let mut out = File::create(&temp).map_err(io_error(&temp))?;
-            out.write_all(&json).map_err(io_error(&temp))?;
-            out.sync_all().map_err(io_error(&temp))?;
-        }
-        fs::rename(&temp, &self.file).map_err(io_error(&self.file))
+        write_atomic(&self.file, &json).map_err(|source| ProgressError::Io {
+            path: self.file.clone(),
+            source,
+        })
     }
+}
+
+/// Replace `file` with `contents` atomically, creating its folder if needed:
+/// write a temporary file next to it, flush that to the disk, then rename it
+/// over the original. A rename within one directory replaces the file in a
+/// single step, so readers see either the old or the new contents, never a mix.
+pub fn write_atomic(file: &Path, contents: &[u8]) -> io::Result<()> {
+    if let Some(dir) = file.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let temp = sibling(file, ".tmp");
+    {
+        // This block limits the file handle's lifetime: it is closed
+        // (dropped) at the closing brace, before the rename below.
+        let mut out = File::create(&temp)?;
+        out.write_all(contents)?;
+        out.sync_all()?;
+    }
+    fs::rename(&temp, file)
 }
 
 /// `dir/progress.json` + `.tmp` -> `dir/progress.json.tmp`.

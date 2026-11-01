@@ -3,8 +3,9 @@
 // The chapter lives in an iframe on the epub:// origin, so the app window
 // can't reach into it. This script talks to the app with postMessage instead:
 // it turns pages, asks the app to change chapter at either end, reports
-// in-book link clicks, scrolling and when the page is ready, and scrolls to a
-// fragment, the end, or a saved position when the app asks.
+// in-book link clicks, scrolling and when the page is ready, scrolls to a
+// fragment, the end, or a saved position when the app asks, and swaps in a
+// new reader stylesheet when preferences change.
 (() => {
   const send = (msg) => parent.postMessage({ justread: msg }, "*");
   const root = document.documentElement;
@@ -62,6 +63,21 @@
     if (cmd.kind === "page") {
       // Arrow keys pressed while the app window (not the chapter) had focus.
       turnPage(cmd.forward);
+    } else if (cmd.kind === "restyle") {
+      // Preferences changed: load the new stylesheet next to the old one,
+      // and only when it has loaded drop the old one and return to the same
+      // place in the text (the layout changes, so pixels would drift).
+      const old = document.querySelector('link[href^="/__justread/reader.css"]');
+      const keep = fraction();
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "/__justread/reader.css?v=" + cmd.version;
+      link.onload = () => {
+        if (old) old.remove();
+        scrollTo(0, keep * maxScroll());
+      };
+      if (old) old.after(link);
+      else (document.head || root).appendChild(link);
     } else if (cmd.kind === "scroll_to_end") {
       scrollTo(0, root.scrollHeight);
     } else if (cmd.kind === "scroll_to_fraction") {

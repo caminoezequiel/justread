@@ -3676,6 +3676,7 @@ dependencies = [
  "percent-encoding",
  "rfd",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

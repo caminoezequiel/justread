@@ -1,21 +1,51 @@
 :root {
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+}
+
+/* App colors per theme; `data-theme` is set on .app from the preferences.
+   --page must match the chapter background (preferences.rs) so switching
+   chapters doesn't flash a different color. */
+.app {
   --bg: #f6f6f4;
   --panel: #ffffff;
   --text: #222;
   --muted: #777;
   --accent: #3b6ea8;
   --border: #ddd;
-  font-family: system-ui, sans-serif;
-  font-size: 14px;
-  color: var(--text);
-  background: var(--bg);
+  --selected: #e3ecf7;
+  --page: #ffffff;
+}
+.app[data-theme="sepia"] {
+  --bg: #ebe2cc;
+  --panel: #f4ecd8;
+  --text: #5b4636;
+  --muted: #8f7a62;
+  --accent: #9c4a12;
+  --border: #d9c9a3;
+  --selected: #e6d6b3;
+  --page: #f4ecd8;
+}
+.app[data-theme="dark"] {
+  --bg: #121214;
+  --panel: #1c1c1e;
+  --text: #d6d6d6;
+  --muted: #8a8a8e;
+  --accent: #8ab4f8;
+  --border: #333336;
+  --selected: #2b3a52;
+  --page: #1c1c1e;
 }
 
 html, body, #main { margin: 0; height: 100%; }
 
-.app { display: flex; flex-direction: column; height: 100vh; }
+.app {
+  display: flex; flex-direction: column; height: 100vh;
+  color: var(--text); background: var(--bg);
+}
 
 .toolbar {
+  position: relative;
   display: flex; align-items: center; gap: 16px;
   padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--border);
 }
@@ -35,7 +65,23 @@ button {
 }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.4; cursor: default; }
-button.open { background: var(--accent); border-color: var(--accent); color: white; }
+button.open { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.settings-toggle { font-family: Georgia, serif; font-weight: 600; }
+
+.settings {
+  position: absolute; top: calc(100% + 4px); right: 12px; z-index: 10;
+  display: flex; flex-direction: column; gap: 12px; padding: 14px 16px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+.settings .row { display: flex; align-items: center; gap: 12px; }
+.settings .label { width: 72px; color: var(--muted); font-size: 12px; }
+.settings .choices { display: flex; gap: 6px; }
+.settings .value { min-width: 56px; }
+.swatch.light { background: #ffffff; color: #222; }
+.swatch.sepia { background: #f4ecd8; color: #5b4636; }
+.swatch.dark { background: #1c1c1e; color: #d6d6d6; }
 
 .error {
   display: flex; align-items: center; gap: 12px; padding: 8px 12px;
@@ -59,8 +105,8 @@ button.open { background: var(--accent); border-color: var(--accent); color: whi
 }
 .sidebar li span { color: var(--muted); }
 .sidebar li button:hover { background: var(--bg); }
-.sidebar li button.current { background: #e3ecf7; color: var(--accent); font-weight: 600; }
+.sidebar li button.current { background: var(--selected); color: var(--accent); font-weight: 600; }
 .muted { color: var(--muted); padding: 0 12px; }
 
-.page { flex: 1; display: flex; min-width: 0; background: white; }
+.page { flex: 1; display: flex; min-width: 0; background: var(--page); }
 .page iframe { flex: 1; border: none; width: 100%; height: 100%; }

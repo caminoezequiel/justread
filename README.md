@@ -53,7 +53,7 @@ The project is built in milestones:
 - [x] **2. Tests:** integration tests against real Project Gutenberg books and a deliberately broken EPUB.
 - [x] **3. Reader UI:** open a file, render chapters, next/previous (buttons and arrow keys), TOC sidebar, progress.
 - [x] **4. Remember position:** per-book reading position saved and restored; reopen the last book on launch.
-- [ ] **5. Reading comfort:** light, dark and sepia themes, font size, line width.
+- [x] **5. Reading comfort:** light, dark and sepia themes, font size, line width.
 - [ ] **6. Packaging:** installable bundles for each OS and CI builds on GitHub Actions.
 
 ## Getting started
@@ -83,6 +83,11 @@ reopens the last one you read. Positions are kept in `progress.json` in your dat
 folder (`~/.local/share/justread` on Linux, `~/Library/Application Support/justread`
 on macOS, `%LOCALAPPDATA%\justread\data` on Windows). Books are recognised by their
 content, so moving or renaming a file keeps its place.
+
+The **Aa** button opens the reading settings: light (the book's own colors), sepia
+or dark theme, text size (60–200%) and maximum line width. They apply instantly,
+keep your place in the text, and are remembered in `preferences.json` next to the
+reading progress.
 
 Keys: <kbd>←</kbd> / <kbd>→</kbd> turn a page (one screenful); at the end or start of a
 chapter they continue into the next or previous one. The **Prev** / **Next** buttons

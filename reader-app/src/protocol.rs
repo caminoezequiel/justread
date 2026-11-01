@@ -28,7 +28,6 @@ const ORIGIN: &str = "http://epub.book";
 /// Files of our own, served next to the book (see `reader.js`).
 const INTERNAL_PREFIX: &str = "__justread/";
 const READER_JS: &str = include_str!("reader.js");
-const READER_CSS: &str = include_str!("reader.css");
 /// Self-closing `<link/>` so the tag is valid in XHTML as well as HTML.
 const INJECTED_TAG: &str = r#"<link rel="stylesheet" href="/__justread/reader.css"/><script src="/__justread/reader.js"></script>"#;
 
@@ -70,6 +69,25 @@ impl SharedBook {
     }
 }
 
+/// The stylesheet added to every chapter (generated from the reader's
+/// preferences), shared like [`SharedBook`] so the UI can update it.
+#[derive(Clone, Default)]
+pub struct SharedStyle(Arc<Mutex<String>>);
+
+impl SharedStyle {
+    pub fn new(css: String) -> Self {
+        SharedStyle(Arc::new(Mutex::new(css)))
+    }
+
+    pub fn set(&self, css: String) {
+        *self.0.lock().unwrap_or_else(|p| p.into_inner()) = css;
+    }
+
+    fn get(&self) -> String {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+}
+
 /// URL of `path` (a zip entry) inside book `id`.
 pub fn url(id: u64, path: &str) -> String {
     let encoded: Vec<String> = path
@@ -89,21 +107,32 @@ pub fn parse_url_path(url_path: &str) -> Option<(u64, String)> {
 
 /// Answer one request from the webview. Never panics: every failure becomes
 /// an HTTP error response that shows up in the iframe.
-pub fn handle(shared: &SharedBook, request: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
+pub fn handle(
+    shared: &SharedBook,
+    style: &SharedStyle,
+    request: &Request<Vec<u8>>,
+) -> Response<Cow<'static, [u8]>> {
     let url_path = request.uri().path();
     if let Some(name) = url_path
         .trim_start_matches('/')
         .strip_prefix(INTERNAL_PREFIX)
     {
-        return match name {
+        let mut response = match name {
             "reader.js" => respond(
                 StatusCode::OK,
                 "text/javascript",
                 READER_JS.as_bytes().to_vec(),
             ),
-            "reader.css" => respond(StatusCode::OK, "text/css", READER_CSS.as_bytes().to_vec()),
-            _ => not_found(url_path),
+            "reader.css" => respond(StatusCode::OK, "text/css", style.get().into_bytes()),
+            _ => return not_found(url_path),
         };
+        // The stylesheet changes with the preferences; never let the webview
+        // reuse an old copy for the next chapter.
+        response.headers_mut().insert(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-store"),
+        );
+        return response;
     }
     let Some((id, path)) = parse_url_path(url_path) else {
         return not_found(url_path);
@@ -201,7 +230,7 @@ fn error_page(status: StatusCode, heading: &str, detail: &str) -> Response<Cow<'
     let body = format!(
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>\
          body {{ font-family: system-ui, sans-serif; color: #444; background: white; margin: 3em; }}\
-         code {{ color: #8a1f1f; }}</style></head>\
+         code {{ color: #8a1f1f; }}</style>{INJECTED_TAG}</head>\
          <body><h2>{}</h2><p><code>{}</code></p></body></html>",
         escape_html(heading),
         escape_html(detail)

@@ -7,9 +7,10 @@ use dioxus::prelude::*;
 use epub_core::{Book, BookKey, EpubError, Href, TocEntry};
 
 use crate::bridge::{Bridge, PageEvent};
-use crate::progress;
-use crate::protocol::{OpenBook, SharedBook};
+use crate::preferences::{LineWidth, MAX_FONT_SCALE, MIN_FONT_SCALE, Preferences, Theme};
+use crate::protocol::{OpenBook, SharedBook, SharedStyle};
 use crate::reader::Reader;
+use crate::storage;
 
 /// Settings decided in `main` before the window opens.
 #[derive(Clone)]
@@ -18,6 +19,9 @@ pub struct Startup {
     pub book: Option<PathBuf>,
     /// Where reading progress is kept (`None`: nowhere, don't save).
     pub progress_file: Option<PathBuf>,
+    /// Where preferences are kept, and their value at launch.
+    pub preferences_file: Option<PathBuf>,
+    pub preferences: Preferences,
 }
 
 /// Which file the open book came from, for saving its progress.
@@ -42,8 +46,30 @@ pub fn App() -> Element {
     let mut error = use_signal(|| None::<String>);
     let mut opened_from = use_signal(|| None::<OpenedFrom>);
     let progress_file = startup.progress_file.clone();
-    let mut store = use_signal(move || progress::load(progress_file));
+    let mut store = use_signal(move || storage::load_progress(progress_file));
+    let mut preferences = use_signal(|| startup.preferences);
+    let mut settings_open = use_signal(|| false);
+    let mut restyles = use_signal(|| 0_u64);
+    let style = use_context::<SharedStyle>();
     let bridge = use_hook(Bridge::start);
+
+    // Apply new preferences: regenerate the chapter stylesheet (used by every
+    // chapter loaded from now on), tell the current chapter to reload it, and
+    // save them.
+    let preferences_file = startup.preferences_file.clone();
+    let restyle_bridge = bridge.clone();
+    let set_preferences = use_callback(move |new: Preferences| {
+        if new == *preferences.peek() {
+            return;
+        }
+        preferences.set(new);
+        style.set(new.chapter_css());
+        restyles += 1;
+        restyle_bridge.restyle(restyles());
+        if let Some(file) = &preferences_file {
+            storage::save_preferences(file, &new);
+        }
+    });
 
     // `use_callback` gives a `Copy` handle to a closure, so the same function
     // can be used from several event handlers below.
@@ -56,7 +82,7 @@ pub fn App() -> Element {
                     opened.restore(position);
                 }
                 store.set_last_opened(&path);
-                progress::save(store);
+                storage::save_progress(store);
             }
             set_window_title(opened.contents.metadata.title.as_deref());
             opened_from.set(Some(OpenedFrom { key, path }));
@@ -100,7 +126,7 @@ pub fn App() -> Element {
         if store.position(&from.key) != Some(position) {
             let title = r.contents.metadata.title.as_deref();
             store.set_position(&from.key, &from.path, title, position);
-            progress::save(store);
+            storage::save_progress(store);
         }
     });
 
@@ -157,9 +183,11 @@ pub fn App() -> Element {
     // Clone a snapshot for this render, so no borrow of the signal is held
     // while the event handlers below write to it.
     let snapshot = reader();
+    let current_preferences = preferences();
 
     rsx! {
-        div { class: "app",
+        // `data-theme` switches the app's own colors (see style.css).
+        div { class: "app", "data-theme": current_preferences.theme.name(),
             header { class: "toolbar",
                 button { class: "open", onclick: pick_file, "Open EPUB" }
                 if let Some(r) = &snapshot {
@@ -167,7 +195,7 @@ pub fn App() -> Element {
                     div { class: "nav",
                         button {
                             disabled: !r.has_prev(),
-                            title: "Previous (←)",
+                            title: "Previous chapter",
                             onclick: move |_| {
                                 if let Some(r) = reader.write().as_mut() {
                                     r.prev();
@@ -177,7 +205,7 @@ pub fn App() -> Element {
                         }
                         button {
                             disabled: !r.has_next(),
-                            title: "Next (→)",
+                            title: "Next chapter",
                             onclick: move |_| {
                                 if let Some(r) = reader.write().as_mut() {
                                     r.next();
@@ -186,6 +214,16 @@ pub fn App() -> Element {
                             "Next ›"
                         }
                     }
+                }
+                button {
+                    class: "settings-toggle",
+                    title: "Reading settings",
+                    "aria-expanded": settings_open(),
+                    onclick: move |_| settings_open.toggle(),
+                    "Aa"
+                }
+                if settings_open() {
+                    Settings { preferences: current_preferences, on_change: set_preferences }
                 }
             }
             if let Some(message) = error() {
@@ -258,6 +296,66 @@ fn BookHeader(reader: Reader) -> Element {
         div { class: "progress", title: "Section {position}",
             span { "{percent}%" }
             div { class: "bar", div { class: "fill", style: "width: {percent}%" } }
+        }
+    }
+}
+
+/// The reading-settings panel: theme, text size and line width.
+#[component]
+fn Settings(preferences: Preferences, on_change: Callback<Preferences>) -> Element {
+    let p = preferences;
+    rsx! {
+        div { class: "settings", role: "dialog", aria_label: "Reading settings",
+            div { class: "row",
+                span { class: "label", "Theme" }
+                div { class: "choices",
+                    for theme in Theme::ALL {
+                        button {
+                            key: "{theme.name()}",
+                            class: "swatch {theme.name()}",
+                            "aria-pressed": p.theme == theme,
+                            onclick: move |_| on_change.call(Preferences { theme, ..p }),
+                            "{theme.label()}"
+                        }
+                    }
+                }
+            }
+            div { class: "row",
+                span { class: "label", "Text size" }
+                div { class: "choices",
+                    button {
+                        title: "Smaller text",
+                        disabled: p.font_scale <= MIN_FONT_SCALE,
+                        onclick: move |_| on_change.call(p.smaller()),
+                        "A−"
+                    }
+                    button {
+                        class: "value",
+                        title: "Reset to the book's size",
+                        onclick: move |_| on_change.call(Preferences { font_scale: 100, ..p }),
+                        "{p.font_scale}%"
+                    }
+                    button {
+                        title: "Larger text",
+                        disabled: p.font_scale >= MAX_FONT_SCALE,
+                        onclick: move |_| on_change.call(p.bigger()),
+                        "A+"
+                    }
+                }
+            }
+            div { class: "row",
+                span { class: "label", "Line width" }
+                div { class: "choices",
+                    for width in LineWidth::ALL {
+                        button {
+                            key: "{width.label()}",
+                            "aria-pressed": p.line_width == width,
+                            onclick: move |_| on_change.call(Preferences { line_width: width, ..p }),
+                            "{width.label()}"
+                        }
+                    }
+                }
+            }
         }
     }
 }
