@@ -44,6 +44,11 @@ fn main() {
                 .with_inner_size(LogicalSize::new(1200.0, 850.0)),
         )
         .with_menu(None)
+        // Release builds: no right-click "Reload"/"Inspect Element" menu and
+        // WebKit's developer tools stay off. Debug builds keep them for
+        // development. (Dioxus 0.7 does this by default; stating it here keeps
+        // it true if that default ever changes.)
+        .with_disable_context_menu(!cfg!(debug_assertions))
         .with_custom_head(format!("<style>{}</style>", include_str!("style.css")))
         .with_custom_protocol(protocol::SCHEME, move |_webview, request| {
             protocol::handle(&handler_book, &handler_style, &request)
