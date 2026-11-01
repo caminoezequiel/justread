@@ -5,3 +5,8 @@ members = ["epub-core", "reader-app"]
 [workspace.package]
 edition = "2024"
 license = "MIT"
+
+# Smaller, faster release builds (used by `dx bundle --release`).
+[profile.release]
+lto = "thin"
+strip = true

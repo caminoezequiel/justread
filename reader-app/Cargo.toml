@@ -2,6 +2,15 @@
 name = "reader-app"
 version = "0.1.0"
 edition = "2024"
+description = "A lightweight EPUB reader"
+# Also the "Maintainer" of the Linux packages built by `dx bundle`.
+authors = ["Ezequiel Camino"]
+
+# The installed program (and the bundle `dx` builds) is called `justread`;
+# the package keeps its workspace name, so `cargo run -p reader-app` works.
+[[bin]]
+name = "justread"
+path = "src/main.rs"
 
 [dependencies]
 dioxus = { version = "=0.7.10", features = ["desktop"] }

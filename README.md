@@ -54,7 +54,7 @@ The project is built in milestones:
 - [x] **3. Reader UI:** open a file, render chapters, next/previous (buttons and arrow keys), TOC sidebar, progress.
 - [x] **4. Remember position:** per-book reading position saved and restored; reopen the last book on launch.
 - [x] **5. Reading comfort:** light, dark and sepia themes, font size, line width.
-- [ ] **6. Packaging:** installable bundles for each OS and CI builds on GitHub Actions.
+- [x] **6. Packaging:** installable bundles for each OS and CI builds on GitHub Actions.
 
 ## Getting started
 
@@ -98,6 +98,57 @@ Print a book's metadata, reading order and table of contents:
 ```bash
 cargo run -p epub-core --example info -- path/to/book.epub
 ```
+
+## Packaging
+
+Installers are built with the Dioxus CLI. Install it once (the version must match
+the `dioxus` crate):
+
+```bash
+cargo install dioxus-cli --version 0.7.10 --locked
+```
+
+Then, **from the repository root** on the OS you are building for (bundles can't
+be cross-built), run the command for that OS. Output goes to `dist/`.
+
+**Linux** (`.deb` and `.rpm`), with the build dependencies above installed:
+
+```bash
+dx bundle -p reader-app --desktop --release --package-types deb --package-types rpm --out-dir dist
+```
+
+The packages install `justread` with a menu entry, icons, and "Open with" for
+`.epub` files. Install with `sudo apt install ./dist/justread_0.1.0_amd64.deb`
+(or `sudo dnf install ./dist/justread-0.1.0-1.x86_64.rpm`).
+
+**macOS** (`.app` and `.dmg`), with the Xcode command line tools
+(`xcode-select --install`):
+
+```bash
+dx bundle -p reader-app --desktop --release --package-types macos --package-types dmg --out-dir dist
+```
+
+The app is not code-signed or notarized, so the first time macOS will refuse to
+open it: right-click the app → **Open**, or run
+`xattr -dr com.apple.quarantine /Applications/Justread.app`.
+
+**Windows** (`.msi` and an `.exe` installer), with the Rust MSVC toolchain
+(Visual Studio Build Tools, "Desktop development with C++"):
+
+```bash
+dx bundle -p reader-app --desktop --release --package-types msi --package-types nsis --out-dir dist
+```
+
+`dx` downloads WiX and NSIS (checksum-verified) the first time. The installers
+are unsigned, so SmartScreen will warn: **More info → Run anyway**. The app needs
+the WebView2 runtime, which Windows 10 and 11 already include.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the checks on Linux, macOS and
+Windows for every push and pull request, and for pushes to `main`, tags and manual
+runs also builds these installers on each OS and attaches them to the run as
+downloadable artifacts.
+
+## Development checks
 
 Run the checks (all must pass before every commit):
 

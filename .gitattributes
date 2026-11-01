@@ -1,0 +1,6 @@
+# Test fixtures must stay byte-for-byte identical on every OS (their SHA-256 is
+# asserted in tests). Without this, Git on Windows may convert line endings in
+# files that look like text, such as tests/fixtures/not-a-zip.epub.
+*.epub binary
+*.png binary
+*.ico binary
