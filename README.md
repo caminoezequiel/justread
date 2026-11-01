@@ -23,7 +23,10 @@ justread has two goals:
 - Opens EPUB 2 and EPUB 3 books, rendered with the book's own styles, images
   and fonts.
 - Table of contents sidebar (EPUB3 `nav.xhtml`, or EPUB2 `toc.ncx`), including
-  jumps to sections inside a chapter; links inside the book work too.
+  jumps to sections inside a chapter; it follows along, highlighting the
+  section you are reading. Links inside the book work too.
+- Search the whole book; results show the chapter and surrounding text, and
+  clicking one jumps to that exact spot and highlights it.
 - Page turning with the arrow keys, continuing across chapters.
 - Current chapter title and overall progress (weighted by chapter length).
 - Remembers your exact place in every book, and reopens the last book on launch.
@@ -47,6 +50,9 @@ justread path/to/book.epub
 | Next / previous chapter | **Next ›** / **‹ Prev** buttons |
 | Go to a chapter or section | Click it in the sidebar |
 | Reading settings | **Aa** button: theme (light keeps the book's own colors), text size 60–200%, line width |
+| Text size | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>+</kbd> / <kbd>−</kbd>, <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>0</kbd> to reset |
+| Search | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd>, type, <kbd>Enter</kbd>; click a result to jump to it |
+| Close search / settings | <kbd>Esc</kbd> |
 
 **Reading position** is saved as you read, per book, in `progress.json`;
 **settings** are saved in `preferences.json`. Both live in your data folder:
@@ -66,6 +72,9 @@ testing), set `JUSTREAD_DATA_DIR`.
 - DRM-protected books (encrypted with `META-INF/encryption.xml`) can't be read.
 - Text size has no effect on books that set font sizes in fixed `px` units.
 - The installers are not code-signed (see [Packaging](#packaging)).
+- Search skips chapters that aren't well-formed XHTML (they still display),
+  and result snippets can run words together where the book separates them
+  only by layout (for example in an index).
 
 ## How it works
 
@@ -84,7 +93,11 @@ entry from the zip when it needs it:
    work without rewriting any HTML.
 5. Two small files are added to each chapter: a stylesheet generated from your
    reading settings (theme, text size, line width), and a script that reports
-   key presses, link clicks and scrolling back to the app.
+   key presses, link clicks, scrolling and the current section back to the
+   app, and finds and highlights search matches.
+6. Search reads the text of every chapter from the zip and counts matches per
+   chapter; the chapter script finds "the n-th match" in the rendered page
+   using exactly the same rules, so the highlight lands on the right one.
 
 Broken or unusual books are handled gracefully: bad links, missing files and
 invalid XML produce clear errors or warnings, never a crash.
@@ -175,13 +188,26 @@ dx bundle -p reader-app --desktop --release --package-types msi --package-types 
 `dx` downloads WiX and NSIS (checksum-verified) the first time. The installers
 are unsigned, so SmartScreen will warn: **More info → Run anyway**.
 
-### Continuous integration
+### Continuous integration and releases
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the
 development checks below on Linux, macOS and Windows for every push and pull
 request. For pushes to `main`, tags and manual runs it also builds the
 installers on each OS and attaches them to the run as artifacts
 (`justread-Linux`, `justread-macOS`, `justread-Windows`).
+
+To publish a release, set the new `version` in `reader-app/Cargo.toml`, commit,
+then push a matching tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+CI then builds all installers and creates a GitHub Release for the tag with
+them attached (`.deb`, `.rpm`, `.dmg`, `.msi`, `.exe`) and generated release
+notes. A tag that doesn't match the version in `Cargo.toml` fails the release
+job instead of publishing mislabelled files.
 
 ## Development checks
 
@@ -207,3 +233,5 @@ justread was built in milestones:
 4. **Remember position:** per-book reading position saved and restored; reopen the last book on launch.
 5. **Reading comfort:** light, dark and sepia themes, text size, line width.
 6. **Packaging:** installable bundles for each OS and CI builds on GitHub Actions.
+7. **Extras:** search, sidebar that follows the current section, text-size
+   shortcuts, releases from version tags.
