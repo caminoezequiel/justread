@@ -9,6 +9,7 @@ use zip::ZipArchive;
 use zip::result::ZipError;
 
 use crate::error::{EpubError, Result};
+use crate::href::Href;
 use crate::opf::{self, Metadata};
 use crate::toc::{self, TocEntry};
 
@@ -62,6 +63,44 @@ impl Contents {
             }
         }
         before
+    }
+
+    /// Fragment ids of the TOC entries that point into the spine item at
+    /// `index`, in TOC order without duplicates: the sections a reader can
+    /// be "in" while scrolling that document.
+    pub fn section_ids(&self, index: usize) -> Vec<String> {
+        let Some(item) = self.spine.get(index) else {
+            return Vec::new();
+        };
+        let mut ids: Vec<String> = Vec::new();
+        for entry in toc::flatten(&self.toc) {
+            if let Some(Href {
+                path,
+                fragment: Some(id),
+            }) = &entry.target
+                && *path == item.path
+                && !ids.contains(id)
+            {
+                ids.push(id.clone());
+            }
+        }
+        ids
+    }
+
+    /// The TOC entry for a position: the entry for `section` (a fragment id
+    /// in the spine item at `index`) if there is one, else the chapter-level
+    /// entry from [`Self::toc_entry_for`].
+    pub fn toc_entry_at(&self, index: usize, section: Option<&str>) -> Option<&TocEntry> {
+        let path = &self.spine.get(index)?.path;
+        let in_section = section.and_then(|id| {
+            toc::flatten(&self.toc).into_iter().find(|entry| {
+                entry
+                    .target
+                    .as_ref()
+                    .is_some_and(|t| t.path == *path && t.fragment.as_deref() == Some(id))
+            })
+        });
+        in_section.or_else(|| self.toc_entry_for(index))
     }
 
     /// Title to show for the spine item at `index` (see [`Self::toc_entry_for`]).

@@ -65,6 +65,9 @@ pub enum PageEvent {
     Scroll {
         path: String,
         fraction: f64,
+        /// Id of the TOC section at the top of the screen, if any.
+        #[serde(default)]
+        section: Option<String>,
     },
     Ready {
         path: String,
@@ -98,6 +101,9 @@ enum Command {
     /// Reload the reader stylesheet; `version` makes the URL unique.
     #[serde(rename = "restyle")]
     Restyle { version: u64 },
+    /// Report which of these element ids is at the top while scrolling.
+    #[serde(rename = "track_sections")]
+    TrackSections { ids: Vec<String> },
 }
 
 /// Handle to the bridge script. Cloning it gives another handle to the same
@@ -122,6 +128,10 @@ impl Bridge {
 
     pub fn restyle(&self, version: u64) {
         self.send(Command::Restyle { version });
+    }
+
+    pub fn track_sections(&self, ids: Vec<String>) {
+        self.send(Command::TrackSections { ids });
     }
 
     fn send(&self, command: Command) {

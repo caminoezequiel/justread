@@ -1,7 +1,7 @@
 //! Reading state of the open book and the navigation rules, kept free of UI
 //! code so it can be unit tested.
 
-use epub_core::{Contents, Position};
+use epub_core::{Contents, Href, Position};
 
 use crate::protocol;
 
@@ -14,6 +14,9 @@ pub struct Reader {
     pub index: usize,
     /// How far the current document is scrolled, `0.0..=1.0`.
     pub fraction: f64,
+    /// The TOC section (fragment id) currently at the top of the screen, as
+    /// reported by the chapter; `None` before its first section heading.
+    pub section: Option<String>,
     /// Where to scroll once the newly loaded document reports ready.
     pending: Option<Scroll>,
 }
@@ -25,6 +28,7 @@ impl Reader {
             contents,
             index: 0,
             fraction: 0.0,
+            section: None,
             pending: None,
         }
     }
@@ -104,6 +108,7 @@ impl Reader {
         }
         self.index = index;
         self.fraction = 0.0;
+        self.section = None;
         // A new document starts at the top by itself; only a fragment needs
         // a scroll once it has loaded.
         self.pending = fragment.map(Scroll::Fragment);
@@ -124,9 +129,7 @@ impl Reader {
     /// The iframe finished loading `url_path`. Returns where to scroll, if
     /// that document is the current one and a scroll is waiting.
     pub fn on_ready(&mut self, url_path: &str) -> Option<Scroll> {
-        let (book_id, path) = protocol::parse_url_path(url_path)?;
-        let current = self.contents.spine.get(self.index)?;
-        if book_id != self.book_id || path != current.path {
+        if !self.is_current(url_path) {
             return None;
         }
         self.pending.take()
@@ -134,18 +137,36 @@ impl Reader {
 
     /// The iframe scrolled. Events from a document that is no longer current
     /// (sent just before a chapter change) are ignored.
-    pub fn on_scroll(&mut self, url_path: &str, fraction: f64) {
-        let is_current = protocol::parse_url_path(url_path).is_some_and(|(book_id, path)| {
+    pub fn on_scroll(&mut self, url_path: &str, fraction: f64, section: Option<String>) {
+        if self.is_current(url_path) {
+            self.fraction = fraction.clamp(0.0, 1.0);
+            self.section = section;
+        }
+    }
+
+    /// Whether `url_path` (from the chapter iframe) is the current document.
+    pub fn is_current(&self, url_path: &str) -> bool {
+        protocol::parse_url_path(url_path).is_some_and(|(book_id, path)| {
             book_id == self.book_id
                 && self
                     .contents
                     .spine
                     .get(self.index)
                     .is_some_and(|item| item.path == path)
-        });
-        if is_current {
-            self.fraction = fraction.clamp(0.0, 1.0);
-        }
+        })
+    }
+
+    /// Section ids the chapter should report while scrolling (see `reader.js`).
+    pub fn section_ids(&self) -> Vec<String> {
+        self.contents.section_ids(self.index)
+    }
+
+    /// Target of the TOC entry to highlight: the current section, or the
+    /// chapter if no section heading has been reached yet.
+    pub fn current_toc_target(&self) -> Option<Href> {
+        self.contents
+            .toc_entry_at(self.index, self.section.as_deref())
+            .and_then(|entry| entry.target.clone())
     }
 
     pub fn chapter_title(&self) -> Option<&str> {
@@ -275,9 +296,11 @@ mod tests {
     fn scroll_from_previous_document_is_ignored() {
         let mut r = reader();
         r.next();
-        r.on_scroll("/3/a.xhtml", 0.9);
+        r.on_scroll("/3/a.xhtml", 0.9, Some("s".into()));
         assert_eq!(r.fraction, 0.0);
-        r.on_scroll("/3/b%20c.xhtml", 0.5);
+        assert_eq!(r.section, None);
+        r.on_scroll("/3/b%20c.xhtml", 0.5, Some("s".into()));
+        assert_eq!(r.section.as_deref(), Some("s"));
         assert_eq!(r.fraction, 0.5);
     }
 

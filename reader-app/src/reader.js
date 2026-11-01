@@ -64,19 +64,39 @@
     send({ kind: "link", path: url.pathname, hash: url.hash });
   });
 
+  // TOC sections in this document (ids, sent by the app once loaded). The
+  // current one is the last heading scrolled past the top third of the screen.
+  let sections = [];
+  const currentSection = () => {
+    let current = null;
+    let best = -Infinity;
+    for (const id of sections) {
+      const el = document.getElementById(id) || document.getElementsByName(id)[0];
+      if (!el) continue;
+      const top = el.getBoundingClientRect().top;
+      if (top <= innerHeight * 0.3 && top > best) {
+        best = top;
+        current = id;
+      }
+    }
+    return current;
+  };
+  const reportScroll = () =>
+    send({ kind: "scroll", path: location.pathname, fraction: fraction(), section: currentSection() });
+
   let timer = null;
   addEventListener("scroll", () => {
     clearTimeout(timer);
-    timer = setTimeout(
-      () => send({ kind: "scroll", path: location.pathname, fraction: fraction() }),
-      150,
-    );
+    timer = setTimeout(reportScroll, 150);
   }, { passive: true });
 
   addEventListener("message", (e) => {
     const cmd = e.source === parent && e.data && e.data.justread;
     if (!cmd) return;
-    if (cmd.kind === "page") {
+    if (cmd.kind === "track_sections") {
+      sections = cmd.ids;
+      reportScroll();
+    } else if (cmd.kind === "page") {
       // Arrow keys pressed while the app window (not the chapter) had focus.
       turnPage(cmd.forward);
     } else if (cmd.kind === "restyle") {

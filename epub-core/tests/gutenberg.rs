@@ -201,3 +201,32 @@ fn media_types_come_from_the_manifest() -> anyhow::Result<()> {
     assert_eq!(book.media_type("OEBPS/not-there.css"), None);
     Ok(())
 }
+
+#[test]
+fn sections_within_a_document_map_to_toc_entries() -> anyhow::Result<()> {
+    let book = Book::open(fixture(FRANKENSTEIN))?;
+    let contents = book.contents();
+
+    // Spine item 1 holds the title page: two TOC entries point into it.
+    assert_eq!(contents.section_ids(1), ["pgepubid00000", "pgepubid00001"]);
+    assert!(
+        contents.section_ids(0).is_empty(),
+        "the cover has no sections"
+    );
+
+    let label = |index, section| {
+        contents
+            .toc_entry_at(index, section)
+            .map(|e| e.label.as_str())
+    };
+    assert_eq!(
+        label(1, Some("pgepubid00001")),
+        Some("or, the Modern Prometheus")
+    );
+    // No (or an unknown) section: the chapter-level entry.
+    assert_eq!(label(1, None), Some("Frankenstein;"));
+    assert_eq!(label(1, Some("no-such-id")), Some("Frankenstein;"));
+    // A section id from another document doesn't count.
+    assert_eq!(label(7, Some("pgepubid00001")), Some("Chapter 1"));
+    Ok(())
+}

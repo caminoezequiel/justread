@@ -130,6 +130,29 @@ pub fn App() -> Element {
         }
     });
 
+    // Keep the highlighted TOC entry visible in the sidebar. `use_memo`
+    // recomputes only when `reader` changes and notifies only when the result
+    // differs, so the effect below runs once per new entry, not on every
+    // scroll event.
+    let current_target =
+        use_memo(move || reader.read().as_ref().and_then(Reader::current_toc_target));
+    use_effect(move || {
+        if current_target.read().is_some() {
+            // After the re-render that moved the highlight; scroll only if the
+            // entry is out of view, so paging through a chapter doesn't
+            // jiggle the sidebar.
+            document::eval(
+                "requestAnimationFrame(() => {
+                   const b = document.querySelector('.sidebar button.current');
+                   const s = document.querySelector('.sidebar');
+                   if (!b || !s) return;
+                   const r = b.getBoundingClientRect(), v = s.getBoundingClientRect();
+                   if (r.top < v.top || r.bottom > v.bottom) b.scrollIntoView({ block: 'center' });
+                 })",
+            );
+        }
+    });
+
     // Handle messages from the page for as long as the app runs.
     let events_bridge = bridge.clone();
     let scroll_bridge = bridge.clone();
@@ -165,11 +188,22 @@ pub fn App() -> Element {
                         None
                     }
                     PageEvent::Link { path, hash } => r.follow_link(&path, &hash),
-                    PageEvent::Scroll { path, fraction } => {
-                        r.on_scroll(&path, fraction);
+                    PageEvent::Scroll {
+                        path,
+                        fraction,
+                        section,
+                    } => {
+                        r.on_scroll(&path, fraction, section);
                         None
                     }
-                    PageEvent::Ready { path } => r.on_ready(&path),
+                    PageEvent::Ready { path } => {
+                        // Sections first: the scroll that may follow then
+                        // already reports the right one.
+                        if r.is_current(&path) {
+                            scroll_bridge.track_sections(r.section_ids());
+                        }
+                        r.on_ready(&path)
+                    }
                     // Handled above, before borrowing the reader.
                     PageEvent::Shortcut { .. } => None,
                 };
@@ -255,7 +289,7 @@ pub fn App() -> Element {
                     }
                 },
                 Some(r) => {
-                    let current = r.contents.toc_entry_for(r.index).and_then(|e| e.target.clone());
+                    let current = r.current_toc_target();
                     let on_select = move |target: Href| {
                         let mut guard = reader.write();
                         let Some(r) = guard.as_mut() else { return };
