@@ -1,0 +1,9 @@
+.idea
+/target
+/dist
+**/*.rs.bk
+.DS_Store
+# Local books you are reading (fixtures live in tests/fixtures and are committed)
+*.epub
+!tests/fixtures/**/*.epub
+!epub-core/tests/fixtures/**/*.epub
