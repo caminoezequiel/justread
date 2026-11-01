@@ -8,6 +8,7 @@
 
 mod app;
 mod bridge;
+mod history;
 mod preferences;
 mod protocol;
 mod reader;

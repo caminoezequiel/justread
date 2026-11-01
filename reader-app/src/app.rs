@@ -120,6 +120,9 @@ pub fn App() -> Element {
     let run_search = use_callback(move |query: String| {
         selected_hit.set(None);
         find_bridge.clear_find();
+        if let Some(r) = reader.write().as_mut() {
+            r.end_search();
+        }
         if query.trim().is_empty() {
             search.set(None);
             return;
@@ -172,6 +175,17 @@ pub fn App() -> Element {
             && let Some(scroll) = r.show_match(hit.spine_index, &query, hit.occurrence)
         {
             pick_bridge.scroll(scroll);
+        }
+    });
+
+    // Back (`true`) or forward through the jump history.
+    let history_bridge = bridge.clone();
+    let go_history = use_callback(move |back: bool| {
+        let mut guard = reader.write();
+        let Some(r) = guard.as_mut() else { return };
+        let scroll = if back { r.go_back() } else { r.go_forward() };
+        if let Some(scroll) = scroll {
+            history_bridge.scroll(scroll);
         }
     });
 
@@ -252,6 +266,8 @@ pub fn App() -> Element {
                         Shortcut::Find => {
                             document::eval("document.getElementById('search')?.select()");
                         }
+                        Shortcut::Back => go_history(true),
+                        Shortcut::Forward => go_history(false),
                         Shortcut::Escape => {
                             settings_open.set(false);
                             if search.peek().is_some() {
@@ -275,7 +291,18 @@ pub fn App() -> Element {
                         r.turn_back();
                         None
                     }
-                    PageEvent::Link { path, hash } => r.follow_link(&path, &hash),
+                    PageEvent::Link {
+                        path,
+                        hash,
+                        from,
+                        fraction,
+                        section,
+                    } => {
+                        // Exactly where the link was clicked, so Back
+                        // returns there.
+                        r.on_scroll(&from, fraction, section);
+                        r.follow_link(&path, &hash)
+                    }
                     PageEvent::Scroll {
                         path,
                         fraction,
@@ -335,6 +362,19 @@ pub fn App() -> Element {
                     BookHeader { reader: r.clone() }
                     div { class: "nav",
                         button {
+                            disabled: !r.can_go_back(),
+                            title: "Back to where you jumped from (Alt+←)",
+                            onclick: move |_| go_history(true),
+                            "← Back"
+                        }
+                        button {
+                            disabled: !r.can_go_forward(),
+                            title: "Forward (Alt+→)",
+                            onclick: move |_| go_history(false),
+                            "→"
+                        }
+                        span { class: "divider" }
+                        button {
                             disabled: !r.has_prev(),
                             title: "Previous chapter",
                             onclick: move |_| {
@@ -387,7 +427,7 @@ pub fn App() -> Element {
                         let Some(r) = guard.as_mut() else { return };
                         match r.contents.spine_index_of(&target.path) {
                             Some(index) => {
-                                if let Some(scroll) = r.go_to(index, target.fragment) {
+                                if let Some(scroll) = r.jump(index, target.fragment) {
                                     bridge.scroll(scroll);
                                 }
                             }

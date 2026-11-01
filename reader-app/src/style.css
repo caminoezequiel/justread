@@ -53,7 +53,8 @@ html, body, #main { margin: 0; height: 100%; }
 .toolbar .title, .toolbar .chapter { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .toolbar .title { font-weight: 600; }
 .toolbar .chapter { color: var(--muted); font-size: 13px; }
-.nav { display: flex; gap: 6px; }
+.nav { display: flex; gap: 6px; align-items: center; }
+.nav .divider { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--border); }
 
 .progress { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .progress .bar { width: 120px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }

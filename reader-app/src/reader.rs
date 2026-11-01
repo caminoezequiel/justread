@@ -3,6 +3,7 @@
 
 use epub_core::{Contents, Href, Position};
 
+use crate::history::History;
 use crate::protocol;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +20,12 @@ pub struct Reader {
     pub section: Option<String>,
     /// Where to scroll once the newly loaded document reports ready.
     pending: Option<Scroll>,
+    /// Places left by jumps, for Back/Forward.
+    history: History,
+    /// A search hit has been shown since the search started; showing more
+    /// hits doesn't record more places, so Back returns to where you were
+    /// reading before the search.
+    in_search: bool,
 }
 
 impl Reader {
@@ -30,6 +37,8 @@ impl Reader {
             fraction: 0.0,
             section: None,
             pending: None,
+            history: History::default(),
+            in_search: false,
         }
     }
 
@@ -115,13 +124,29 @@ impl Reader {
         None
     }
 
+    /// Like [`Self::go_to`], but remembers the current place for
+    /// [`Self::go_back`]: for jumps (links, TOC entries), not for reading on.
+    pub fn jump(&mut self, index: usize, fragment: Option<String>) -> Option<Scroll> {
+        if index >= self.contents.spine.len() {
+            return None;
+        }
+        self.history.record(self.position());
+        self.in_search = false;
+        self.go_to(index, fragment)
+    }
+
     /// Show search hit `occurrence` of `query` in spine item `index`: like
-    /// [`Self::go_to`], but scrolling to (and highlighting) the match.
+    /// [`Self::go_to`], but scrolling to (and highlighting) the match. The
+    /// first hit shown in a search is a jump (see [`Self::end_search`]).
     pub fn show_match(&mut self, index: usize, query: &str, occurrence: usize) -> Option<Scroll> {
         let scroll = Scroll::Match {
             query: query.to_owned(),
             occurrence,
         };
+        if !self.in_search {
+            self.history.record(self.position());
+            self.in_search = true;
+        }
         if index == self.index {
             self.pending = None;
             return Some(scroll);
@@ -139,7 +164,53 @@ impl Reader {
             return None;
         }
         let index = self.contents.spine_index_of(&path)?;
-        self.go_to(index, decode_fragment(hash))
+        self.jump(index, decode_fragment(hash))
+    }
+
+    /// The search was closed or replaced: its next hit is a new jump.
+    pub fn end_search(&mut self) {
+        self.in_search = false;
+    }
+
+    pub fn can_go_back(&self) -> bool {
+        self.history.can_go_back()
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        self.history.can_go_forward()
+    }
+
+    /// Return to the place the last jump left. Like [`Self::go_to`], returns
+    /// the scroll to send now if the document is already loaded.
+    pub fn go_back(&mut self) -> Option<Scroll> {
+        let to = self.history.back(self.position())?;
+        self.in_search = false;
+        self.go_to_position(to)
+    }
+
+    /// Undo a [`Self::go_back`].
+    pub fn go_forward(&mut self) -> Option<Scroll> {
+        let to = self.history.forward(self.position())?;
+        self.in_search = false;
+        self.go_to_position(to)
+    }
+
+    fn go_to_position(&mut self, to: Position) -> Option<Scroll> {
+        if to.spine_index >= self.contents.spine.len() {
+            return None;
+        }
+        let scroll = Scroll::Fraction(to.fraction);
+        let now = if to.spine_index == self.index {
+            self.pending = None;
+            Some(scroll)
+        } else {
+            self.go_to(to.spine_index, None);
+            self.pending = Some(scroll);
+            None
+        };
+        // Known already, so progress is right before the chapter reports in.
+        self.fraction = to.fraction;
+        now
     }
 
     /// The iframe finished loading `url_path`. Returns where to scroll, if
@@ -344,5 +415,65 @@ mod tests {
         assert_eq!(r.follow_link("/2/b%20c.xhtml", ""), None);
         assert_eq!(r.follow_link("/3/image.png", ""), None);
         assert_eq!(r.index, 0);
+        assert!(!r.can_go_back(), "nothing to go back to");
+    }
+
+    #[test]
+    fn back_returns_to_where_a_link_was_followed() {
+        let mut r = reader();
+        r.on_scroll("/3/a.xhtml", 0.3, None);
+        r.follow_link("/3/b%20c.xhtml", "#note");
+        r.on_ready("/3/b%20c.xhtml");
+        r.on_scroll("/3/b%20c.xhtml", 0.8, None);
+
+        assert_eq!(r.go_back(), None, "other document: wait for it to load");
+        assert_eq!(r.index, 0);
+        assert_eq!(r.progress(), r.contents.progress(0, 0.3));
+        assert_eq!(r.on_ready("/3/a.xhtml"), Some(Scroll::Fraction(0.3)));
+        assert!(!r.can_go_back());
+
+        assert_eq!(r.go_forward(), None);
+        assert_eq!(r.index, 1);
+        assert_eq!(r.on_ready("/3/b%20c.xhtml"), Some(Scroll::Fraction(0.8)));
+    }
+
+    #[test]
+    fn back_within_a_document_scrolls_immediately() {
+        let mut r = reader();
+        r.on_scroll("/3/a.xhtml", 0.3, None);
+        assert_eq!(
+            r.follow_link("/3/a.xhtml", "#n1"),
+            Some(Scroll::Fragment("n1".into()))
+        );
+        assert_eq!(r.go_back(), Some(Scroll::Fraction(0.3)));
+        assert_eq!(r.on_ready("/3/a.xhtml"), None, "nothing left pending");
+    }
+
+    #[test]
+    fn reading_on_is_not_a_jump() {
+        let mut r = reader();
+        r.next();
+        r.turn_back();
+        r.go_to(1, None);
+        assert!(!r.can_go_back());
+        r.jump(0, None);
+        assert!(r.can_go_back(), "TOC entries are jumps");
+    }
+
+    #[test]
+    fn browsing_search_hits_records_one_place() {
+        let mut r = reader();
+        r.on_scroll("/3/a.xhtml", 0.3, None);
+        r.show_match(0, "q", 0);
+        r.show_match(1, "q", 0);
+        r.show_match(1, "q", 1);
+        r.go_back();
+        assert_eq!(r.position().spine_index, 0);
+        assert_eq!(r.fraction, 0.3, "back to before the search");
+        assert!(!r.can_go_back());
+
+        r.end_search();
+        r.show_match(1, "q", 0);
+        assert!(r.can_go_back(), "a new search records again");
     }
 }

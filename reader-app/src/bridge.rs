@@ -17,10 +17,15 @@ addEventListener("message", (e) => {
   const f = frame();
   if (f && e.source === f.contentWindow && e.data && e.data.justread) dioxus.send(e.data.justread);
 });
-// Ctrl/Cmd + "+"/"=", "-", "0" (text size), Ctrl/Cmd+F (search) and
-// Escape; reader.js detects the same keys inside the chapter.
+// Ctrl/Cmd + "+"/"=", "-", "0" (text size), Ctrl/Cmd+F (search), Escape
+// and Alt+←/→ (back/forward); reader.js detects the same keys inside the
+// chapter.
 const shortcut = (e) => {
   if (e.key === "Escape") return "escape";
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    if (e.key === "ArrowLeft") return "back";
+    if (e.key === "ArrowRight") return "forward";
+  }
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
   if (e.key === "+" || e.key === "=") return "bigger";
   if (e.key === "-" || e.key === "_") return "smaller";
@@ -44,6 +49,11 @@ addEventListener("keydown", (e) => {
     f.contentWindow.postMessage({ justread: { kind: "page", forward: e.key === "ArrowRight" } }, "*");
   }
 });
+addEventListener("mouseup", (e) => {
+  if (e.button !== 3 && e.button !== 4) return;
+  e.preventDefault();
+  dioxus.send({ kind: "shortcut", action: e.button === 3 ? "back" : "forward" });
+});
 while (true) {
   const command = await dioxus.recv();
   const f = frame();
@@ -60,9 +70,15 @@ pub enum PageEvent {
     Turn {
         forward: bool,
     },
+    /// An in-book link was clicked in document `from`, scrolled to
+    /// `fraction` with `section` at the top (as in `Scroll`).
     Link {
         path: String,
         hash: String,
+        from: String,
+        fraction: f64,
+        #[serde(default)]
+        section: Option<String>,
     },
     Scroll {
         path: String,
@@ -91,6 +107,10 @@ pub enum Shortcut {
     /// Ctrl/Cmd+F: focus the search box.
     Find,
     Escape,
+    /// Alt+← or the mouse's back button: undo the last jump.
+    Back,
+    /// Alt+→ or the mouse's forward button.
+    Forward,
 }
 
 /// Requests sent to the chapter; `kind` is what `reader.js` matches on.

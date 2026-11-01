@@ -32,6 +32,10 @@
   // Same shortcuts as the app window (bridge.rs), handled by the app.
   const shortcut = (e) => {
     if (e.key === "Escape") return "escape";
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      if (e.key === "ArrowLeft") return "back";
+      if (e.key === "ArrowRight") return "forward";
+    }
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
     if (e.key === "+" || e.key === "=") return "bigger";
     if (e.key === "-" || e.key === "_") return "smaller";
@@ -54,7 +58,16 @@
     }
   });
 
-  // Links within the book go through the app, which keeps its state in sync.
+  // The mouse's side buttons (back/forward), where the webview reports them.
+  addEventListener("mouseup", (e) => {
+    if (e.button !== 3 && e.button !== 4) return;
+    e.preventDefault();
+    send({ kind: "shortcut", action: e.button === 3 ? "back" : "forward" });
+  });
+
+  // Links within the book go through the app, which keeps its state in sync
+  // and remembers where the link was clicked (the exact scroll position: the
+  // debounced scroll report may not have been sent yet), for going back.
   // Other links (http:, mailto:) keep their default behaviour.
   document.addEventListener("click", (e) => {
     const a = e.target.closest && e.target.closest("a[href]");
@@ -62,7 +75,14 @@
     const url = new URL(a.getAttribute("href"), location.href);
     if (url.protocol !== location.protocol || url.host !== location.host) return;
     e.preventDefault();
-    send({ kind: "link", path: url.pathname, hash: url.hash });
+    send({
+      kind: "link",
+      path: url.pathname,
+      hash: url.hash,
+      from: location.pathname,
+      fraction: fraction(),
+      section: currentSection(),
+    });
   });
 
   // TOC sections in this document (ids, sent by the app once loaded). The
