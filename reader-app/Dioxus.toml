@@ -31,3 +31,9 @@ depends = ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libxdo3"]
 # dx reads this path relative to the directory it runs in, so always run
 # `dx bundle` from the workspace root.
 desktop_template = "reader-app/packaging/justread.desktop"
+
+[bundle.windows.webview_install_mode.DownloadBootstrapper]
+# Windows 10 and 11 already ship the WebView2 runtime. dx's default embeds the
+# ~170 MB offline installer in every .msi/.exe; this instead downloads it
+# during installation, only on the rare machine that lacks it.
+silent = true
