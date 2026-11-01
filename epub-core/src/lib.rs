@@ -10,6 +10,7 @@ mod book;
 mod error;
 mod href;
 mod opf;
+mod progress;
 mod toc;
 mod xml;
 
@@ -19,5 +20,6 @@ pub use book::{Book, Contents, SpineItem};
 pub use error::{EpubError, Result};
 pub use href::Href;
 pub use opf::Metadata;
+pub use progress::{BookKey, Position, ProgressError, ProgressStore};
 pub use toc::{TocEntry, flatten};
 pub use xml::is_well_formed as is_well_formed_xml;

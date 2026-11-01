@@ -52,7 +52,7 @@ The project is built in milestones:
 - [x] **1. Core parsing:** open an EPUB, read title, author, spine and TOC; `info` CLI.
 - [x] **2. Tests:** integration tests against real Project Gutenberg books and a deliberately broken EPUB.
 - [x] **3. Reader UI:** open a file, render chapters, next/previous (buttons and arrow keys), TOC sidebar, progress.
-- [ ] **4. Remember position:** per-book reading position saved and restored; reopen the last book on launch.
+- [x] **4. Remember position:** per-book reading position saved and restored; reopen the last book on launch.
 - [ ] **5. Reading comfort:** light, dark and sepia themes, font size, line width.
 - [ ] **6. Packaging:** installable bundles for each OS and CI builds on GitHub Actions.
 
@@ -77,6 +77,12 @@ With hot reload during development (install the CLI once with
 ```bash
 dx serve -p reader-app --platform desktop
 ```
+
+justread remembers where you are in every book and, when started without a book,
+reopens the last one you read. Positions are kept in `progress.json` in your data
+folder (`~/.local/share/justread` on Linux, `~/Library/Application Support/justread`
+on macOS, `%LOCALAPPDATA%\justread\data` on Windows). Books are recognised by their
+content, so moving or renaming a file keeps its place.
 
 Keys: <kbd>←</kbd> / <kbd>→</kbd> turn a page (one screenful); at the end or start of a
 chapter they continue into the next or previous one. The **Prev** / **Next** buttons

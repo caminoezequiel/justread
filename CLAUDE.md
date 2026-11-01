@@ -15,15 +15,17 @@ Cargo workspace (`Cargo.toml` at the root, edition 2024, resolver 3):
   - `href.rs`: `Href::resolve(from_doc, href)`: percent-decoding, `#fragment`, `..`, and rejecting paths that escape the archive or remote URLs.
   - `xml.rs`: `roxmltree` helpers (match by local name, DTD allowed, BOM stripped).
   - `error.rs`: `EpubError` (`thiserror`) and `Result<T>`.
+  - `progress.rs`: `BookKey` (hex SHA-256 of the file, so moved/renamed books keep their place), `Position { spine_index, fraction }`, and `ProgressStore`: one JSON file (`last_opened` + `books` keyed by hash), saved atomically (write `<file>.tmp`, `sync_all`, rename). A missing file is an empty store; an unparseable one is moved to `<file>.corrupt` with a warning, never overwritten. Unknown/missing JSON fields are tolerated (`#[serde(default)]`).
   - `examples/info.rs`: CLI that prints metadata, spine and TOC.
 - `reader-app/`: Dioxus 0.7 desktop binary. `reader-app [book.epub]`.
-  - `main.rs`: window config, registers the `epub` custom protocol, provides `SharedBook` and `StartupPath` as contexts.
+  - `main.rs`: window config, registers the `epub` custom protocol, provides `SharedBook` and `Startup` (CLI book, progress file) as contexts.
+  - `progress.rs`: `progress.json` location (`directories` `data_local_dir`, overridable with `JUSTREAD_DATA_DIR`), load/save that log errors instead of failing. If the file exists but can't be read, saving is disabled rather than overwriting it.
   - `protocol.rs`: serves `epub://book/<book-id>/<path-in-zip>` (Windows: `http://epub.book/...`) from the open book with the right Content-Type; injects `<link href="/__justread/reader.css"/>` + `<script src="/__justread/reader.js">` before `</head>` of documents only; serves malformed XHTML as `text/html`; error pages instead of panics. `SharedBook = Arc<Mutex<Option<OpenBook>>>`.
   - `reader.js`: runs inside each chapter; postMessage bridge to the app. ←/→ turn a screenful (`turnPage`) and send `turn` only at the chapter's end/start; also sends in-book link clicks, scroll fraction, ready; receives `page` and `scroll_to` (fragment or end).
   - `reader.css`: minimal CSS added after the book's own (side padding on `<html>` so hanging footnote markers/list numbers aren't clipped). Milestone 5 themes go here.
   - `bridge.rs`: the app-side half (one long-running `document::eval`), `PageEvent` / `Command` serde enums.
   - `reader.rs`: `Reader` state and navigation rules (next/prev, go_to, follow_link, on_ready, on_scroll); unit tested, no UI code.
-  - `app.rs`: components (`App`, `BookHeader`, recursive `TocList`); `style.css` is inlined via `with_custom_head`.
+  - `app.rs`: components (`App`, `BookHeader`, recursive `TocList`); `style.css` is inlined via `with_custom_head`. On open: hash the file, `Reader::restore` the saved position (applied as `Scroll::Fraction` once the chapter reports ready), record `last_opened`. A `use_effect` saves whenever `Reader::position()` changes (scroll events are debounced in `reader.js`, so roughly once per scroll stop). With no CLI argument the last book is reopened if it still exists.
 
 ## How an EPUB is read
 
@@ -45,6 +47,8 @@ cargo run -p reader-app -- path/to/book.epub   # or: dx serve -p reader-app --pl
 ```
 
 All three checks (fmt, clippy with `-D warnings`, tests) must pass before every commit.
+
+Use `JUSTREAD_DATA_DIR=<scratch dir>` when testing so the real `~/.local/share/justread/progress.json` isn't touched.
 
 Verifying the UI on Linux: start the app with `WEBKIT_INSPECTOR_HTTP_SERVER=127.0.0.1:9334` and drive it through WebKit's remote inspector websocket (`/socket/1/1/WebPage`, commands wrapped in `Target.sendMessageToTarget`; `Runtime.evaluate` for DOM/state, `Page.snapshotRect` for screenshots). Avoid port 9222 (often a Chrome debugging port). Cross-origin iframe internals are not reachable this way; verify them through their effects (progress, current chapter). `dx serve` renames the binary (`reader-app-<hash>`), so stop it by PID.
 

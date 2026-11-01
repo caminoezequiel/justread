@@ -1,7 +1,7 @@
 //! Reading state of the open book and the navigation rules, kept free of UI
 //! code so it can be unit tested.
 
-use epub_core::Contents;
+use epub_core::{Contents, Position};
 
 use crate::protocol;
 
@@ -26,6 +26,26 @@ impl Reader {
             index: 0,
             fraction: 0.0,
             pending: None,
+        }
+    }
+
+    /// Continue from a saved position (ignored if it doesn't fit this book).
+    pub fn restore(&mut self, position: Position) {
+        if position.spine_index >= self.contents.spine.len() {
+            return;
+        }
+        self.index = position.spine_index;
+        self.fraction = position.fraction.clamp(0.0, 1.0);
+        if self.fraction > 0.0 {
+            self.pending = Some(Scroll::Fraction(self.fraction));
+        }
+    }
+
+    /// The current position, for saving.
+    pub fn position(&self) -> Position {
+        Position {
+            spine_index: self.index,
+            fraction: self.fraction,
         }
     }
 
@@ -140,12 +160,15 @@ impl Reader {
 /// Where the chapter iframe should scroll to.
 ///
 /// Unlike a C enum, Rust enum variants can carry data: `Fragment` holds the
-/// id to scroll to, while `Top` and `End` need nothing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// id to scroll to and `Fraction` a saved scroll position, while `Top` and
+/// `End` need nothing. (No `Eq` derive: `f64` only supports `PartialEq`,
+/// because NaN is not equal to itself.)
+#[derive(Debug, Clone, PartialEq)]
 pub enum Scroll {
     Top,
     Fragment(String),
     End,
+    Fraction(f64),
 }
 
 fn decode_fragment(hash: &str) -> Option<String> {
@@ -221,6 +244,31 @@ mod tests {
         r.turn_back();
         assert_eq!(r.index, 0);
         assert_eq!(r.on_ready("/3/a.xhtml"), Some(Scroll::End));
+    }
+
+    #[test]
+    fn restoring_waits_for_the_document_then_scrolls_to_the_fraction() {
+        let mut r = reader();
+        r.restore(Position {
+            spine_index: 1,
+            fraction: 0.4,
+        });
+        assert_eq!(r.index, 1);
+        assert_eq!(r.on_ready("/3/b%20c.xhtml"), Some(Scroll::Fraction(0.4)));
+        assert_eq!(
+            r.position(),
+            Position {
+                spine_index: 1,
+                fraction: 0.4
+            }
+        );
+
+        let mut r = reader();
+        r.restore(Position {
+            spine_index: 99,
+            fraction: 0.5,
+        });
+        assert_eq!(r.index, 0, "out-of-range positions are ignored");
     }
 
     #[test]

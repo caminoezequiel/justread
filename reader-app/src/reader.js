@@ -4,7 +4,7 @@
 // can't reach into it. This script talks to the app with postMessage instead:
 // it turns pages, asks the app to change chapter at either end, reports
 // in-book link clicks, scrolling and when the page is ready, and scrolls to a
-// fragment (or the end) when the app asks.
+// fragment, the end, or a saved position when the app asks.
 (() => {
   const send = (msg) => parent.postMessage({ justread: msg }, "*");
   const root = document.documentElement;
@@ -62,11 +62,11 @@
     if (cmd.kind === "page") {
       // Arrow keys pressed while the app window (not the chapter) had focus.
       turnPage(cmd.forward);
+    } else if (cmd.kind === "scroll_to_end") {
+      scrollTo(0, root.scrollHeight);
+    } else if (cmd.kind === "scroll_to_fraction") {
+      scrollTo(0, cmd.fraction * maxScroll());
     } else if (cmd.kind === "scroll_to") {
-      if (cmd.end) {
-        scrollTo(0, root.scrollHeight);
-        return;
-      }
       const id = cmd.fragment;
       const target = id && (document.getElementById(id) || document.getElementsByName(id)[0]);
       if (target) target.scrollIntoView();

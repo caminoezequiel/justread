@@ -1,9 +1,10 @@
 //! justread: a lightweight EPUB reader.
 //!
-//! Usage: `reader-app [book.epub]`
+//! Usage: `reader-app [book.epub]`. Without a book, the last one read is reopened.
 
 mod app;
 mod bridge;
+mod progress;
 mod protocol;
 mod reader;
 
@@ -13,7 +14,10 @@ use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 
 fn main() {
     let shared = protocol::SharedBook::default();
-    let startup = app::StartupPath(std::env::args_os().nth(1).map(PathBuf::from));
+    let startup = app::Startup {
+        book: std::env::args_os().nth(1).map(PathBuf::from),
+        progress_file: progress::progress_file(),
+    };
 
     // The protocol handler gets its own clone of the shared book handle; the
     // `move` closure takes ownership of that clone.

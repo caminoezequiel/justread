@@ -54,10 +54,17 @@ pub enum PageEvent {
     },
 }
 
+/// Scroll requests sent to the chapter; `kind` is what `reader.js` matches on.
 #[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum Command {
-    ScrollTo { fragment: Option<String>, end: bool },
+#[serde(tag = "kind")]
+enum ScrollCommand {
+    /// To an element id, or to the top when `fragment` is `None`.
+    #[serde(rename = "scroll_to")]
+    Fragment { fragment: Option<String> },
+    #[serde(rename = "scroll_to_end")]
+    End,
+    #[serde(rename = "scroll_to_fraction")]
+    Fraction { fraction: f64 },
 }
 
 /// Handle to the bridge script. Cloning it gives another handle to the same
@@ -72,18 +79,10 @@ impl Bridge {
 
     pub fn scroll(&self, scroll: Scroll) {
         let command = match scroll {
-            Scroll::Top => Command::ScrollTo {
-                fragment: None,
-                end: false,
-            },
-            Scroll::Fragment(id) => Command::ScrollTo {
-                fragment: Some(id),
-                end: false,
-            },
-            Scroll::End => Command::ScrollTo {
-                fragment: None,
-                end: true,
-            },
+            Scroll::Top => ScrollCommand::Fragment { fragment: None },
+            Scroll::Fragment(id) => ScrollCommand::Fragment { fragment: Some(id) },
+            Scroll::End => ScrollCommand::End,
+            Scroll::Fraction(fraction) => ScrollCommand::Fraction { fraction },
         };
         if let Err(e) = self.0.send(command) {
             eprintln!("justread: could not send to the chapter: {e}");

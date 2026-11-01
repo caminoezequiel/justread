@@ -4,15 +4,28 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use epub_core::{Book, EpubError, Href, TocEntry};
+use epub_core::{Book, BookKey, EpubError, Href, TocEntry};
 
 use crate::bridge::{Bridge, PageEvent};
+use crate::progress;
 use crate::protocol::{OpenBook, SharedBook};
 use crate::reader::Reader;
 
-/// Book passed on the command line, if any.
+/// Settings decided in `main` before the window opens.
 #[derive(Clone)]
-pub struct StartupPath(pub Option<PathBuf>);
+pub struct Startup {
+    /// Book passed on the command line, if any.
+    pub book: Option<PathBuf>,
+    /// Where reading progress is kept (`None`: nowhere, don't save).
+    pub progress_file: Option<PathBuf>,
+}
+
+/// Which file the open book came from, for saving its progress.
+#[derive(Clone, PartialEq)]
+struct OpenedFrom {
+    key: BookKey,
+    path: PathBuf,
+}
 
 /// Source of unique book ids. An atomic integer can be updated through a
 /// shared reference (`&`), which is all a `static` gives us.
@@ -21,19 +34,32 @@ static NEXT_BOOK_ID: AtomicU64 = AtomicU64::new(1);
 #[component]
 pub fn App() -> Element {
     let shared = use_context::<SharedBook>();
-    let startup = use_context::<StartupPath>();
+    let startup = use_context::<Startup>();
     // Signals are reactive state: reading one inside a component subscribes
     // it, and writing re-renders the subscribers. They are `Copy`, so closures
     // can capture them by value freely.
     let mut reader = use_signal(|| None::<Reader>);
     let mut error = use_signal(|| None::<String>);
+    let mut opened_from = use_signal(|| None::<OpenedFrom>);
+    let progress_file = startup.progress_file.clone();
+    let mut store = use_signal(move || progress::load(progress_file));
     let bridge = use_hook(Bridge::start);
 
     // `use_callback` gives a `Copy` handle to a closure, so the same function
     // can be used from several event handlers below.
     let open = use_callback(move |path: PathBuf| match open_book(&shared, &path) {
-        Ok(opened) => {
+        Ok((mut opened, key)) => {
+            // Remember the absolute path, so reopening works from any directory.
+            let path = std::fs::canonicalize(&path).unwrap_or(path);
+            if let Some(store) = store.write().as_mut() {
+                if let Some(position) = store.position(&key) {
+                    opened.restore(position);
+                }
+                store.set_last_opened(&path);
+                progress::save(store);
+            }
             set_window_title(opened.contents.metadata.title.as_deref());
+            opened_from.set(Some(OpenedFrom { key, path }));
             reader.set(Some(opened));
             error.set(None);
         }
@@ -44,9 +70,37 @@ pub fn App() -> Element {
         ))),
     });
 
+    // On launch: the book from the command line, else the last one read
+    // (if it still exists).
     use_hook(move || {
-        if let Some(path) = startup.0 {
+        let last = || {
+            let store = store.peek();
+            let path = store.as_ref()?.last_opened()?.to_path_buf();
+            path.exists().then_some(path)
+        };
+        if let Some(path) = startup.book.or_else(last) {
             open(path);
+        }
+    });
+
+    // Save the position whenever it changes. An effect re-runs every time a
+    // signal it *reads* changes (here `reader` and `opened_from`); writing
+    // `store` doesn't subscribe to it, so this can't loop.
+    use_effect(move || {
+        let reader = reader.read();
+        let opened_from = opened_from.read();
+        let (Some(r), Some(from)) = (reader.as_ref(), opened_from.as_ref()) else {
+            return;
+        };
+        let position = r.position();
+        let mut store = store.write();
+        let Some(store) = store.as_mut() else {
+            return;
+        };
+        if store.position(&from.key) != Some(position) {
+            let title = r.contents.metadata.title.as_deref();
+            store.set_position(&from.key, &from.path, title, position);
+            progress::save(store);
         }
     });
 
@@ -241,15 +295,18 @@ fn TocList(
     }
 }
 
-fn open_book(shared: &SharedBook, path: &Path) -> Result<Reader, EpubError> {
+/// Open the book at `path`, make it the one served over `epub://`, and
+/// return its reading state plus its identity for saving progress.
+fn open_book(shared: &SharedBook, path: &Path) -> Result<(Reader, BookKey), EpubError> {
     let book = Book::open(path)?;
+    let key = BookKey::from_file(path)?;
     for warning in book.warnings() {
         eprintln!("justread: {}: {warning}", path.display());
     }
     let id = NEXT_BOOK_ID.fetch_add(1, Ordering::Relaxed);
     let reader = Reader::new(id, book.contents().clone());
     *shared.lock() = Some(OpenBook { id, book });
-    Ok(reader)
+    Ok((reader, key))
 }
 
 fn set_window_title(book_title: Option<&str>) {
