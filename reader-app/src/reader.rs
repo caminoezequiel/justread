@@ -14,8 +14,8 @@ pub struct Reader {
     pub index: usize,
     /// How far the current document is scrolled, `0.0..=1.0`.
     pub fraction: f64,
-    /// Fragment to scroll to once the newly loaded document reports ready.
-    pending_fragment: Option<String>,
+    /// Where to scroll once the newly loaded document reports ready.
+    pending: Option<Scroll>,
 }
 
 impl Reader {
@@ -25,7 +25,7 @@ impl Reader {
             contents,
             index: 0,
             fraction: 0.0,
-            pending_fragment: None,
+            pending: None,
         }
     }
 
@@ -59,6 +59,15 @@ impl Reader {
         }
     }
 
+    /// Page back past the start of a chapter: open the previous one at its
+    /// end, so reading backwards is continuous.
+    pub fn turn_back(&mut self) {
+        if self.has_prev() {
+            self.go_to(self.index - 1, None);
+            self.pending = Some(Scroll::End);
+        }
+    }
+
     /// Move to spine item `index`, optionally at `fragment`.
     ///
     /// Returns `Some(scroll)` when the document is already loaded and only
@@ -70,12 +79,14 @@ impl Reader {
             return None;
         }
         if index == self.index {
-            self.pending_fragment = None;
-            return Some(Scroll { fragment });
+            self.pending = None;
+            return Some(fragment.map_or(Scroll::Top, Scroll::Fragment));
         }
         self.index = index;
         self.fraction = 0.0;
-        self.pending_fragment = fragment;
+        // A new document starts at the top by itself; only a fragment needs
+        // a scroll once it has loaded.
+        self.pending = fragment.map(Scroll::Fragment);
         None
     }
 
@@ -91,16 +102,14 @@ impl Reader {
     }
 
     /// The iframe finished loading `url_path`. Returns where to scroll, if
-    /// that document is the current one and a fragment is waiting.
+    /// that document is the current one and a scroll is waiting.
     pub fn on_ready(&mut self, url_path: &str) -> Option<Scroll> {
         let (book_id, path) = protocol::parse_url_path(url_path)?;
         let current = self.contents.spine.get(self.index)?;
         if book_id != self.book_id || path != current.path {
             return None;
         }
-        self.pending_fragment.take().map(|fragment| Scroll {
-            fragment: Some(fragment),
-        })
+        self.pending.take()
     }
 
     /// The iframe scrolled. Events from a document that is no longer current
@@ -128,10 +137,15 @@ impl Reader {
     }
 }
 
-/// A request for the chapter iframe to scroll: to `fragment`, or to the top.
+/// Where the chapter iframe should scroll to.
+///
+/// Unlike a C enum, Rust enum variants can carry data: `Fragment` holds the
+/// id to scroll to, while `Top` and `End` need nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Scroll {
-    pub fragment: Option<String>,
+pub enum Scroll {
+    Top,
+    Fragment(String),
+    End,
 }
 
 fn decode_fragment(hash: &str) -> Option<String> {
@@ -182,9 +196,7 @@ mod tests {
         assert_eq!(r.on_ready("/3/a.xhtml"), None, "stale document");
         assert_eq!(
             r.on_ready("/3/b%20c.xhtml"),
-            Some(Scroll {
-                fragment: Some("n 1".into())
-            })
+            Some(Scroll::Fragment("n 1".into()))
         );
         assert_eq!(r.on_ready("/3/b%20c.xhtml"), None, "only once");
     }
@@ -194,14 +206,21 @@ mod tests {
         let mut r = reader();
         assert_eq!(
             r.go_to(0, Some("x".into())),
-            Some(Scroll {
-                fragment: Some("x".into())
-            })
+            Some(Scroll::Fragment("x".into()))
         );
-        assert_eq!(
-            r.follow_link("/3/a.xhtml", ""),
-            Some(Scroll { fragment: None })
-        );
+        assert_eq!(r.follow_link("/3/a.xhtml", ""), Some(Scroll::Top));
+    }
+
+    #[test]
+    fn paging_back_lands_at_the_end_of_the_previous_chapter() {
+        let mut r = reader();
+        r.turn_back();
+        assert_eq!(r.index, 0, "nothing before the first chapter");
+        r.next();
+        assert_eq!(r.on_ready("/3/b%20c.xhtml"), None, "next starts at the top");
+        r.turn_back();
+        assert_eq!(r.index, 0);
+        assert_eq!(r.on_ready("/3/a.xhtml"), Some(Scroll::End));
     }
 
     #[test]

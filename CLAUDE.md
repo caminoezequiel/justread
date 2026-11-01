@@ -18,8 +18,9 @@ Cargo workspace (`Cargo.toml` at the root, edition 2024, resolver 3):
   - `examples/info.rs`: CLI that prints metadata, spine and TOC.
 - `reader-app/`: Dioxus 0.7 desktop binary. `reader-app [book.epub]`.
   - `main.rs`: window config, registers the `epub` custom protocol, provides `SharedBook` and `StartupPath` as contexts.
-  - `protocol.rs`: serves `epub://book/<book-id>/<path-in-zip>` (Windows: `http://epub.book/...`) from the open book with the right Content-Type; injects `<script src="/__justread/reader.js">` into spine documents only; serves malformed XHTML as `text/html`; error pages instead of panics. `SharedBook = Arc<Mutex<Option<OpenBook>>>`.
-  - `reader.js`: runs inside each chapter; postMessage bridge to the app (keys, in-book link clicks, scroll fraction, ready; receives `scroll_to`).
+  - `protocol.rs`: serves `epub://book/<book-id>/<path-in-zip>` (Windows: `http://epub.book/...`) from the open book with the right Content-Type; injects `<link href="/__justread/reader.css"/>` + `<script src="/__justread/reader.js">` before `</head>` of documents only; serves malformed XHTML as `text/html`; error pages instead of panics. `SharedBook = Arc<Mutex<Option<OpenBook>>>`.
+  - `reader.js`: runs inside each chapter; postMessage bridge to the app. ←/→ turn a screenful (`turnPage`) and send `turn` only at the chapter's end/start; also sends in-book link clicks, scroll fraction, ready; receives `page` and `scroll_to` (fragment or end).
+  - `reader.css`: minimal CSS added after the book's own (side padding on `<html>` so hanging footnote markers/list numbers aren't clipped). Milestone 5 themes go here.
   - `bridge.rs`: the app-side half (one long-running `document::eval`), `PageEvent` / `Command` serde enums.
   - `reader.rs`: `Reader` state and navigation rules (next/prev, go_to, follow_link, on_ready, on_scroll); unit tested, no UI code.
   - `app.rs`: components (`App`, `BookHeader`, recursive `TocList`); `style.css` is inlined via `with_custom_head`.

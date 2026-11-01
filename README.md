@@ -78,7 +78,9 @@ With hot reload during development (install the CLI once with
 dx serve -p reader-app --platform desktop
 ```
 
-Keys: <kbd>←</kbd> / <kbd>→</kbd> previous / next section.
+Keys: <kbd>←</kbd> / <kbd>→</kbd> turn a page (one screenful); at the end or start of a
+chapter they continue into the next or previous one. The **Prev** / **Next** buttons
+jump a whole chapter.
 
 Print a book's metadata, reading order and table of contents:
 

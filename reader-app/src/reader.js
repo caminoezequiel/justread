@@ -2,21 +2,37 @@
 //
 // The chapter lives in an iframe on the epub:// origin, so the app window
 // can't reach into it. This script talks to the app with postMessage instead:
-// it reports keys, in-book link clicks, scrolling and when the page is ready,
-// and it scrolls to a fragment when the app asks.
+// it turns pages, asks the app to change chapter at either end, reports
+// in-book link clicks, scrolling and when the page is ready, and scrolls to a
+// fragment (or the end) when the app asks.
 (() => {
   const send = (msg) => parent.postMessage({ justread: msg }, "*");
   const root = document.documentElement;
+  const maxScroll = () => root.scrollHeight - innerHeight;
   const fraction = () => {
-    const max = root.scrollHeight - innerHeight;
+    const max = maxScroll();
     return max > 0 ? Math.min(1, scrollY / max) : 1;
   };
 
+  // One "page" is a screenful, minus a little overlap so the reader keeps
+  // their place. At the end (or start) of the chapter, ask the app to turn
+  // to the next (or previous) chapter instead.
+  const turnPage = (forward) => {
+    const overlap = Math.min(48, innerHeight * 0.1);
+    if (forward && scrollY >= maxScroll() - 2) {
+      send({ kind: "turn", forward: true });
+    } else if (!forward && scrollY <= 2) {
+      send({ kind: "turn", forward: false });
+    } else {
+      scrollBy({ top: (forward ? 1 : -1) * (innerHeight - overlap), behavior: "instant" });
+    }
+  };
+
   document.addEventListener("keydown", (e) => {
-    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
-      send({ kind: "key", key: e.key });
+      turnPage(e.key === "ArrowRight");
     }
   });
 
@@ -42,11 +58,20 @@
 
   addEventListener("message", (e) => {
     const cmd = e.source === parent && e.data && e.data.justread;
-    if (!cmd || cmd.kind !== "scroll_to") return;
-    const id = cmd.fragment;
-    const target = id && (document.getElementById(id) || document.getElementsByName(id)[0]);
-    if (target) target.scrollIntoView();
-    else scrollTo(0, 0);
+    if (!cmd) return;
+    if (cmd.kind === "page") {
+      // Arrow keys pressed while the app window (not the chapter) had focus.
+      turnPage(cmd.forward);
+    } else if (cmd.kind === "scroll_to") {
+      if (cmd.end) {
+        scrollTo(0, root.scrollHeight);
+        return;
+      }
+      const id = cmd.fragment;
+      const target = id && (document.getElementById(id) || document.getElementsByName(id)[0]);
+      if (target) target.scrollIntoView();
+      else scrollTo(0, 0);
+    }
   });
 
   addEventListener("load", () => send({ kind: "ready", path: location.pathname }));

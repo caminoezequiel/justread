@@ -63,15 +63,14 @@ pub fn App() -> Element {
                     continue;
                 };
                 let scroll = match event {
-                    PageEvent::Key { key } if key == "ArrowRight" => {
+                    PageEvent::Turn { forward: true } => {
                         r.next();
                         None
                     }
-                    PageEvent::Key { key } if key == "ArrowLeft" => {
-                        r.prev();
+                    PageEvent::Turn { forward: false } => {
+                        r.turn_back();
                         None
                     }
-                    PageEvent::Key { .. } => None,
                     PageEvent::Link { path, hash } => r.follow_link(&path, &hash),
                     PageEvent::Scroll { path, fraction } => {
                         r.on_scroll(&path, fraction);

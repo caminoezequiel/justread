@@ -28,7 +28,9 @@ const ORIGIN: &str = "http://epub.book";
 /// Files of our own, served next to the book (see `reader.js`).
 const INTERNAL_PREFIX: &str = "__justread/";
 const READER_JS: &str = include_str!("reader.js");
-const INJECTED_TAG: &str = r#"<script src="/__justread/reader.js"></script>"#;
+const READER_CSS: &str = include_str!("reader.css");
+/// Self-closing `<link/>` so the tag is valid in XHTML as well as HTML.
+const INJECTED_TAG: &str = r#"<link rel="stylesheet" href="/__justread/reader.css"/><script src="/__justread/reader.js"></script>"#;
 
 /// Characters that must be escaped inside one URL path segment.
 const SEGMENT: &AsciiSet = &CONTROLS
@@ -99,6 +101,7 @@ pub fn handle(shared: &SharedBook, request: &Request<Vec<u8>>) -> Response<Cow<'
                 "text/javascript",
                 READER_JS.as_bytes().to_vec(),
             ),
+            "reader.css" => respond(StatusCode::OK, "text/css", READER_CSS.as_bytes().to_vec()),
             _ => not_found(url_path),
         };
     }
@@ -139,7 +142,7 @@ fn is_document(media_type: &str) -> bool {
     matches!(media_type, "application/xhtml+xml" | "text/html")
 }
 
-/// Add the bridge script to a chapter, and fall back to HTML parsing for
+/// Add the bridge script and reader stylesheet to a chapter, and fall back to HTML parsing for
 /// "XHTML" that isn't well-formed XML (the browser would otherwise show an
 /// XML error page instead of the chapter).
 fn prepare_document(media_type: &str, bytes: Vec<u8>) -> (&'static str, Vec<u8>) {

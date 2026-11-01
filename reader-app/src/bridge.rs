@@ -1,8 +1,10 @@
 //! The app side of the postMessage bridge; the chapter side is `reader.js`.
 //!
 //! One long-running `eval` script forwards messages from the chapter iframe
-//! (and arrow keys pressed while the app window has focus) to Rust via
-//! `dioxus.send`, and forwards commands from Rust to the iframe.
+//! to Rust via `dioxus.send`, and forwards commands from Rust to the iframe.
+//! Arrow keys pressed while the app window (not the chapter) has focus are
+//! passed straight to the chapter, which knows whether to turn a page or ask
+//! for the next chapter.
 
 use dioxus::document::{Eval, EvalError, eval};
 use serde::{Deserialize, Serialize};
@@ -16,10 +18,11 @@ addEventListener("message", (e) => {
   if (f && e.source === f.contentWindow && e.data && e.data.justread) dioxus.send(e.data.justread);
 });
 addEventListener("keydown", (e) => {
-  if (e.altKey || e.ctrlKey || e.metaKey) return;
-  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const f = frame();
+  if (f && f.contentWindow && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
     e.preventDefault();
-    dioxus.send({ kind: "key", key: e.key });
+    f.contentWindow.postMessage({ justread: { kind: "page", forward: e.key === "ArrowRight" } }, "*");
   }
 });
 while (true) {
@@ -30,20 +33,31 @@ while (true) {
 "#;
 
 /// Messages from the page. `#[serde(tag = "kind")]` maps the JS object
-/// `{kind: "key", key: "ArrowLeft"}` to `PageEvent::Key { key: .. }`.
+/// `{kind: "turn", forward: true}` to `PageEvent::Turn { forward: true }`.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PageEvent {
-    Key { key: String },
-    Link { path: String, hash: String },
-    Scroll { path: String, fraction: f64 },
-    Ready { path: String },
+    /// Arrow key at the end (`forward`) or start of a chapter.
+    Turn {
+        forward: bool,
+    },
+    Link {
+        path: String,
+        hash: String,
+    },
+    Scroll {
+        path: String,
+        fraction: f64,
+    },
+    Ready {
+        path: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Command {
-    ScrollTo { fragment: Option<String> },
+    ScrollTo { fragment: Option<String>, end: bool },
 }
 
 /// Handle to the bridge script. Cloning it gives another handle to the same
@@ -57,8 +71,19 @@ impl Bridge {
     }
 
     pub fn scroll(&self, scroll: Scroll) {
-        let command = Command::ScrollTo {
-            fragment: scroll.fragment,
+        let command = match scroll {
+            Scroll::Top => Command::ScrollTo {
+                fragment: None,
+                end: false,
+            },
+            Scroll::Fragment(id) => Command::ScrollTo {
+                fragment: Some(id),
+                end: false,
+            },
+            Scroll::End => Command::ScrollTo {
+                fragment: None,
+                end: true,
+            },
         };
         if let Err(e) = self.0.send(command) {
             eprintln!("justread: could not send to the chapter: {e}");
