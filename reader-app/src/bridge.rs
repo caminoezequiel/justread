@@ -17,7 +17,24 @@ addEventListener("message", (e) => {
   const f = frame();
   if (f && e.source === f.contentWindow && e.data && e.data.justread) dioxus.send(e.data.justread);
 });
+// Ctrl/Cmd + "+"/"=", "-", "0" (text size) and Escape, also used by reader.js.
+const shortcut = (e) => {
+  if (e.key === "Escape") return "escape";
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
+  if (e.key === "+" || e.key === "=") return "bigger";
+  if (e.key === "-" || e.key === "_") return "smaller";
+  if (e.key === "0") return "reset_size";
+  return null;
+};
 addEventListener("keydown", (e) => {
+  const action = shortcut(e);
+  if (action) {
+    e.preventDefault();
+    dioxus.send({ kind: "shortcut", action });
+    return;
+  }
+  // Arrow keys in a text field (e.g. the search box) edit the text.
+  if (e.target.closest && e.target.closest("input, textarea, select")) return;
   if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const f = frame();
   if (f && f.contentWindow && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
@@ -52,6 +69,19 @@ pub enum PageEvent {
     Ready {
         path: String,
     },
+    /// A keyboard shortcut, pressed in the app window or in the chapter.
+    Shortcut {
+        action: Shortcut,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Shortcut {
+    Bigger,
+    Smaller,
+    ResetSize,
+    Escape,
 }
 
 /// Requests sent to the chapter; `kind` is what `reader.js` matches on.

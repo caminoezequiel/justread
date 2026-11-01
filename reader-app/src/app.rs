@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use dioxus::prelude::*;
 use epub_core::{Book, BookKey, EpubError, Href, TocEntry};
 
-use crate::bridge::{Bridge, PageEvent};
+use crate::bridge::{Bridge, PageEvent, Shortcut};
 use crate::preferences::{LineWidth, MAX_FONT_SCALE, MIN_FONT_SCALE, Preferences, Theme};
 use crate::protocol::{OpenBook, SharedBook, SharedStyle};
 use crate::reader::Reader;
@@ -138,6 +138,19 @@ pub fn App() -> Element {
         let scroll_bridge = scroll_bridge.clone();
         async move {
             while let Some(event) = bridge.next_event().await {
+                if let PageEvent::Shortcut { action } = event {
+                    let current = *preferences.peek();
+                    match action {
+                        Shortcut::Bigger => set_preferences(current.bigger()),
+                        Shortcut::Smaller => set_preferences(current.smaller()),
+                        Shortcut::ResetSize => set_preferences(Preferences {
+                            font_scale: 100,
+                            ..current
+                        }),
+                        Shortcut::Escape => settings_open.set(false),
+                    }
+                    continue;
+                }
                 let mut guard = reader.write();
                 let Some(r) = guard.as_mut() else {
                     continue;
@@ -157,6 +170,8 @@ pub fn App() -> Element {
                         None
                     }
                     PageEvent::Ready { path } => r.on_ready(&path),
+                    // Handled above, before borrowing the reader.
+                    PageEvent::Shortcut { .. } => None,
                 };
                 if let Some(scroll) = scroll {
                     scroll_bridge.scroll(scroll);

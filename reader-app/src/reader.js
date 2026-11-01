@@ -29,7 +29,23 @@
     }
   };
 
+  // Same shortcuts as the app window (bridge.rs), handled by the app.
+  const shortcut = (e) => {
+    if (e.key === "Escape") return "escape";
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
+    if (e.key === "+" || e.key === "=") return "bigger";
+    if (e.key === "-" || e.key === "_") return "smaller";
+    if (e.key === "0") return "reset_size";
+    return null;
+  };
+
   document.addEventListener("keydown", (e) => {
+    const action = shortcut(e);
+    if (action) {
+      e.preventDefault();
+      send({ kind: "shortcut", action });
+      return;
+    }
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
