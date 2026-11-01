@@ -18,6 +18,55 @@ justread has two goals:
    The EPUB format is parsed by hand, not with an existing EPUB crate, to
    understand how it works.
 
+## Features
+
+- Opens EPUB 2 and EPUB 3 books, rendered with the book's own styles, images
+  and fonts.
+- Table of contents sidebar (EPUB3 `nav.xhtml`, or EPUB2 `toc.ncx`), including
+  jumps to sections inside a chapter; links inside the book work too.
+- Page turning with the arrow keys, continuing across chapters.
+- Current chapter title and overall progress (weighted by chapter length).
+- Remembers your exact place in every book, and reopens the last book on launch.
+- Light, sepia and dark themes, text size and line width, applied instantly.
+- Broken or unusual books open whenever possible; problems show as clear
+  messages, never a crash.
+
+## Using justread
+
+Start it with a book, or without one to reopen the last book you read (or use
+**Open EPUB**):
+
+```bash
+justread path/to/book.epub
+```
+
+| Action | How |
+|---|---|
+| Turn a page | <kbd>→</kbd> / <kbd>←</kbd> (one screenful; at the end or start of a chapter they continue into the next or previous one) |
+| Scroll | <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Page Up</kbd> / <kbd>Page Down</kbd>, <kbd>Space</kbd>, mouse wheel |
+| Next / previous chapter | **Next ›** / **‹ Prev** buttons |
+| Go to a chapter or section | Click it in the sidebar |
+| Reading settings | **Aa** button: theme (light keeps the book's own colors), text size 60–200%, line width |
+
+**Reading position** is saved as you read, per book, in `progress.json`;
+**settings** are saved in `preferences.json`. Both live in your data folder:
+
+| OS | Folder |
+|---|---|
+| Linux | `~/.local/share/justread` |
+| macOS | `~/Library/Application Support/justread` |
+| Windows | `%LOCALAPPDATA%\justread\data` |
+
+Books are recognised by their content (a SHA-256 of the file), so moving or
+renaming a file keeps its place. To use a different folder (for example while
+testing), set `JUSTREAD_DATA_DIR`.
+
+### Known limitations
+
+- DRM-protected books (encrypted with `META-INF/encryption.xml`) can't be read.
+- Text size has no effect on books that set font sizes in fixed `px` units.
+- The installers are not code-signed (see [Packaging](#packaging)).
+
 ## How it works
 
 An EPUB is a zip file of XHTML, CSS, images and fonts, plus a few XML files
@@ -32,8 +81,10 @@ entry from the zip when it needs it:
 4. In the app, each chapter is shown in an iframe. The iframe loads it from a
    custom URL (`epub://book/<id>/<path-in-zip>`) that returns the zip entry
    directly, so the chapter's relative links to stylesheets, images and fonts
-   work without rewriting any HTML. A tiny script added to each chapter
-   reports key presses, link clicks and scrolling back to the app.
+   work without rewriting any HTML.
+5. Two small files are added to each chapter: a stylesheet generated from your
+   reading settings (theme, text size, line width), and a script that reports
+   key presses, link clicks and scrolling back to the app.
 
 Broken or unusual books are handled gracefully: bad links, missing files and
 invalid XML produce clear errors or warnings, never a crash.
@@ -43,55 +94,39 @@ invalid XML produce clear errors or warnings, never a crash.
 | Crate | Kind | Purpose |
 |---|---|---|
 | [`epub-core`](epub-core/) | library | EPUB parsing, resource access, TOC, reading-progress persistence. No UI code. |
-| [`reader-app`](reader-app/) | binary | The desktop UI, built with [Dioxus](https://dioxuslabs.com/) (renders through the OS webview). |
+| [`reader-app`](reader-app/) | binary `justread` | The desktop UI, built with [Dioxus](https://dioxuslabs.com/) (renders through the OS webview). |
 
-## Status
+See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
 
-The project is built in milestones:
+## Building from source
 
-- [x] **1. Core parsing:** open an EPUB, read title, author, spine and TOC; `info` CLI.
-- [x] **2. Tests:** integration tests against real Project Gutenberg books and a deliberately broken EPUB.
-- [x] **3. Reader UI:** open a file, render chapters, next/previous (buttons and arrow keys), TOC sidebar, progress.
-- [x] **4. Remember position:** per-book reading position saved and restored; reopen the last book on launch.
-- [x] **5. Reading comfort:** light, dark and sepia themes, font size, line width.
-- [x] **6. Packaging:** installable bundles for each OS and CI builds on GitHub Actions.
+Install Rust with [rustup](https://rustup.rs/), plus the platform's webview
+build requirements:
 
-## Getting started
+- **Linux** (Ubuntu/Debian): the WebKitGTK development packages:
 
-Install Rust with [rustup](https://rustup.rs/). On Linux, the desktop UI also
-needs the WebKitGTK development packages (Ubuntu/Debian):
+  ```bash
+  sudo apt install libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
+  ```
 
-```bash
-sudo apt install libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
-```
+- **macOS**: the Xcode command line tools (`xcode-select --install`).
+- **Windows**: the Rust MSVC toolchain (Visual Studio Build Tools, "Desktop
+  development with C++"). The WebView2 runtime is already part of Windows 10
+  and 11.
 
-Read a book (or start without one and use **Open EPUB**):
+Run the reader:
 
 ```bash
 cargo run -p reader-app -- path/to/book.epub
 ```
 
-With hot reload during development (install the CLI once with
-`cargo install dioxus-cli --version 0.7.10 --locked`):
+With hot reload during development (install the Dioxus CLI once with
+`cargo install dioxus-cli --version 0.7.10 --locked`). `dx serve` doesn't pass
+a book path, so it reopens the last book:
 
 ```bash
 dx serve -p reader-app --platform desktop
 ```
-
-justread remembers where you are in every book and, when started without a book,
-reopens the last one you read. Positions are kept in `progress.json` in your data
-folder (`~/.local/share/justread` on Linux, `~/Library/Application Support/justread`
-on macOS, `%LOCALAPPDATA%\justread\data` on Windows). Books are recognised by their
-content, so moving or renaming a file keeps its place.
-
-The **Aa** button opens the reading settings: light (the book's own colors), sepia
-or dark theme, text size (60–200%) and maximum line width. They apply instantly,
-keep your place in the text, and are remembered in `preferences.json` next to the
-reading progress.
-
-Keys: <kbd>←</kbd> / <kbd>→</kbd> turn a page (one screenful); at the end or start of a
-chapter they continue into the next or previous one. The **Prev** / **Next** buttons
-jump a whole chapter.
 
 Print a book's metadata, reading order and table of contents:
 
@@ -111,7 +146,7 @@ cargo install dioxus-cli --version 0.7.10 --locked
 Then, **from the repository root** on the OS you are building for (bundles can't
 be cross-built), run the command for that OS. Output goes to `dist/`.
 
-**Linux** (`.deb` and `.rpm`), with the build dependencies above installed:
+**Linux** (`.deb` and `.rpm`):
 
 ```bash
 dx bundle -p reader-app --desktop --release --package-types deb --package-types rpm --out-dir dist
@@ -121,8 +156,7 @@ The packages install `justread` with a menu entry, icons, and "Open with" for
 `.epub` files. Install with `sudo apt install ./dist/justread_0.1.0_amd64.deb`
 (or `sudo dnf install ./dist/justread-0.1.0-1.x86_64.rpm`).
 
-**macOS** (`.app` and `.dmg`), with the Xcode command line tools
-(`xcode-select --install`):
+**macOS** (`.app` and `.dmg`):
 
 ```bash
 dx bundle -p reader-app --desktop --release --package-types macos --package-types dmg --out-dir dist
@@ -132,21 +166,22 @@ The app is not code-signed or notarized, so the first time macOS will refuse to
 open it: right-click the app → **Open**, or run
 `xattr -dr com.apple.quarantine /Applications/Justread.app`.
 
-**Windows** (`.msi` and an `.exe` installer), with the Rust MSVC toolchain
-(Visual Studio Build Tools, "Desktop development with C++"):
+**Windows** (`.msi` and an `.exe` installer):
 
 ```bash
 dx bundle -p reader-app --desktop --release --package-types msi --package-types nsis --out-dir dist
 ```
 
 `dx` downloads WiX and NSIS (checksum-verified) the first time. The installers
-are unsigned, so SmartScreen will warn: **More info → Run anyway**. The app needs
-the WebView2 runtime, which Windows 10 and 11 already include.
+are unsigned, so SmartScreen will warn: **More info → Run anyway**.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs the checks on Linux, macOS and
-Windows for every push and pull request, and for pushes to `main`, tags and manual
-runs also builds these installers on each OS and attaches them to the run as
-downloadable artifacts.
+### Continuous integration
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the
+development checks below on Linux, macOS and Windows for every push and pull
+request. For pushes to `main`, tags and manual runs it also builds the
+installers on each OS and attaches them to the run as artifacts
+(`justread-Linux`, `justread-macOS`, `justread-Windows`).
 
 ## Development checks
 
@@ -158,4 +193,17 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-See [CLAUDE.md](CLAUDE.md) for architecture details and coding conventions.
+The integration tests run against real public-domain books from Project
+Gutenberg and a set of deliberately broken EPUBs, all in
+[`epub-core/tests/fixtures`](epub-core/tests/fixtures/README.md).
+
+## Project history
+
+justread was built in milestones:
+
+1. **Core parsing:** open an EPUB, read title, author, spine and TOC; `info` CLI.
+2. **Tests:** integration tests against real Project Gutenberg books and hand-made broken EPUBs.
+3. **Reader UI:** open a file, render chapters, page turning, TOC sidebar, progress.
+4. **Remember position:** per-book reading position saved and restored; reopen the last book on launch.
+5. **Reading comfort:** light, dark and sepia themes, text size, line width.
+6. **Packaging:** installable bundles for each OS and CI builds on GitHub Actions.
