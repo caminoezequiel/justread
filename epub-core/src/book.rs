@@ -155,13 +155,13 @@ fn load_toc<R: Read + Seek>(
         match read_string(archive, &nav.path).and_then(|t| toc::parse_nav(&t, &nav.path)) {
             Ok(entries) if !entries.is_empty() => return entries,
             Ok(_) => warnings.push(format!("{} has an empty table of contents", nav.path)),
-            Err(e) => warnings.push(format!("could not read nav document: {e}")),
+            Err(e) => warnings.push(format!("could not read nav document: {}", e.full_message())),
         }
     }
     if let Some(ncx) = package.ncx_item() {
         match read_string(archive, &ncx.path).and_then(|t| toc::parse_ncx(&t, &ncx.path)) {
             Ok(entries) => return entries,
-            Err(e) => warnings.push(format!("could not read NCX: {e}")),
+            Err(e) => warnings.push(format!("could not read NCX: {}", e.full_message())),
         }
     }
     Vec::new()

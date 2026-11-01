@@ -36,5 +36,23 @@ pub enum EpubError {
     BadHref(String),
 }
 
+impl EpubError {
+    /// This error and all of its causes on one line, e.g.
+    /// `invalid XML in OPS/nav.xhtml: unexpected end of stream`.
+    pub fn full_message(&self) -> String {
+        let mut message = self.to_string();
+        // `source()` comes from the `std::error::Error` trait and returns
+        // `Option<&dyn Error>`: a *trait object*, i.e. "some type that
+        // implements Error", whose concrete type is only known at runtime.
+        let mut source = std::error::Error::source(self);
+        while let Some(cause) = source {
+            message.push_str(": ");
+            message.push_str(&cause.to_string());
+            source = cause.source();
+        }
+        message
+    }
+}
+
 /// Shorthand used throughout the crate: `Result<T>` means `Result<T, EpubError>`.
 pub type Result<T> = std::result::Result<T, EpubError>;

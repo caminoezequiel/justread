@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-made broken EPUB: every problem below must be survivable. -->
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">broken-fixture</dc:identifier>
+    <dc:title>  A   Broken
+      Book  </dc:title>
+    <!-- no dc:creator, no dc:language -->
+  </metadata>
+  <manifest>
+    <!-- percent-encoded href with a space in the real file name -->
+    <item id="ch1" href="text/Chapter%201.xhtml" media-type="application/xhtml+xml"/>
+    <!-- '..' segment that stays inside the archive -->
+    <item id="ch2" href="text/../text/ch2.xhtml" media-type="application/xhtml+xml"/>
+    <!-- listed in the manifest but not present in the zip -->
+    <item id="missing" href="text/missing.xhtml" media-type="application/xhtml+xml"/>
+    <!-- escapes the archive root: must be rejected -->
+    <item id="escape" href="../../etc/passwd" media-type="application/xhtml+xml"/>
+    <!-- remote resource: must be rejected -->
+    <item id="remote" href="https://example.com/x.css" media-type="text/css"/>
+    <!-- no href at all -->
+    <item id="nohref" media-type="text/css"/>
+    <item id="style" href="style.css" media-type="text/css"/>
+    <!-- nav document that is not well-formed XML: must fall back to the NCX -->
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="ch1"/>
+    <itemref idref="ghost"/>
+    <itemref idref="ch2" linear="no"/>
+    <itemref idref="missing"/>
+    <itemref idref="escape"/>
+  </spine>
+</package>

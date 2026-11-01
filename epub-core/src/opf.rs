@@ -118,7 +118,7 @@ pub fn parse(opf_xml: &str, opf_path: &str, warnings: &mut Vec<String>) -> Resul
                         },
                     );
                 }
-                Err(e) => warnings.push(format!("manifest item {id:?}: {e}")),
+                Err(e) => warnings.push(format!("manifest item {id:?}: {}", e.full_message())),
             }
         }
     }

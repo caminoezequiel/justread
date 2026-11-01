@@ -49,7 +49,7 @@ invalid XML produce clear errors or warnings, never a crash.
 The project is built in milestones:
 
 - [x] **1. Core parsing:** open an EPUB, read title, author, spine and TOC; `info` CLI.
-- [ ] **2. Tests:** integration tests against real Project Gutenberg books and a deliberately broken EPUB.
+- [x] **2. Tests:** integration tests against real Project Gutenberg books and a deliberately broken EPUB.
 - [ ] **3. Reader UI:** open a file, render chapters, next/previous (buttons and arrow keys), TOC sidebar, progress.
 - [ ] **4. Remember position:** per-book reading position saved and restored; reopen the last book on launch.
 - [ ] **5. Reading comfort:** light, dark and sepia themes, font size, line width.

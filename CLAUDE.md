@@ -43,5 +43,8 @@ All three checks (fmt, clippy with `-D warnings`, tests) must pass before every 
 - `thiserror` errors in `epub-core`; `anyhow` in binaries/examples. Error variants that wrap a source don't repeat it in their message.
 - Dependency versions are pinned exactly (`=x.y.z`). Check docs.rs or the crate source for the pinned version before using an API (Dioxus changes a lot between versions).
 - Prefer integration tests against real fixture EPUBs (`epub-core/tests/`); small unit tests only for pure helpers like `href.rs`.
+  - `tests/gutenberg.rs`: real public-domain books; `tests/broken.rs`: hand-made broken books; `tests/common/mod.rs`: shared helpers.
+  - Fixtures and their sources are listed in `epub-core/tests/fixtures/README.md`. Hand-made fixtures are built from `tests/fixtures/hand-made/<name>/` by `hand-made/build.sh`; edit the folder, rerun the script, commit both.
+  - Never commit commercial or copyrighted books as fixtures.
 - Small modules, simple code, short comments explaining Rust concepts where they first appear.
 - Linux build deps for the Dioxus app: `libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev pkg-config`.
