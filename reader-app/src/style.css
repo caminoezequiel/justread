@@ -97,6 +97,21 @@ button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
   width: 280px; flex-shrink: 0; overflow-y: auto; padding: 8px 0;
   background: var(--panel); border-right: 1px solid var(--border);
 }
+.sidebar .search { padding: 0 8px 8px; }
+.sidebar .search input {
+  width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit;
+  color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+}
+.sidebar .search input:focus { outline: none; border-color: var(--accent); }
+.results-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 0 8px 6px 12px; color: var(--muted); font-size: 12px;
+}
+.results-header button { padding: 2px 8px; }
+.sidebar ul.hits { padding: 0 4px; }
+.hits .where { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.hits .snippet { display: block; font-size: 13px; }
+.hits mark { background: #ffd54f; color: #1c1c1e; border-radius: 2px; }
 .sidebar ul { list-style: none; margin: 0; padding: 0 0 0 12px; }
 .sidebar > ul { padding-left: 4px; }
 .sidebar li button, .sidebar li span {

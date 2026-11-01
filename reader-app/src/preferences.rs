@@ -162,6 +162,9 @@ impl Preferences {
         // left of the text column (they'd be cut off at the iframe's edge).
         // Padding goes on <html> because books style <body>, rarely <html>.
         let mut css = String::from("html { padding: 0 2.5rem; }\n");
+        // The current search match (set by reader.js with the CSS Custom
+        // Highlight API).
+        css += "::highlight(jr-search) { background-color: #ffd54f; color: #1c1c1e; }\n";
 
         if self.font_scale != 100 {
             // Books size text in em/% almost everywhere, so scaling the root
@@ -209,7 +212,7 @@ mod tests {
         assert!(css.contains("padding: 0 2.5rem"));
         assert!(css.contains("max-width: 40em"));
         assert!(!css.contains("font-size"));
-        assert!(!css.contains("background"));
+        assert!(!css.contains("background:"), "no theme colors");
     }
 
     #[test]

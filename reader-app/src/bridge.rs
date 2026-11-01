@@ -17,13 +17,15 @@ addEventListener("message", (e) => {
   const f = frame();
   if (f && e.source === f.contentWindow && e.data && e.data.justread) dioxus.send(e.data.justread);
 });
-// Ctrl/Cmd + "+"/"=", "-", "0" (text size) and Escape, also used by reader.js.
+// Ctrl/Cmd + "+"/"=", "-", "0" (text size), Ctrl/Cmd+F (search) and
+// Escape; reader.js detects the same keys inside the chapter.
 const shortcut = (e) => {
   if (e.key === "Escape") return "escape";
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
   if (e.key === "+" || e.key === "=") return "bigger";
   if (e.key === "-" || e.key === "_") return "smaller";
   if (e.key === "0") return "reset_size";
+  if (e.key === "f" || e.key === "F") return "find";
   return null;
 };
 addEventListener("keydown", (e) => {
@@ -72,6 +74,8 @@ pub enum PageEvent {
     Ready {
         path: String,
     },
+    /// The chapter couldn't locate a search hit it was asked to show.
+    FindFailed,
     /// A keyboard shortcut, pressed in the app window or in the chapter.
     Shortcut {
         action: Shortcut,
@@ -84,6 +88,8 @@ pub enum Shortcut {
     Bigger,
     Smaller,
     ResetSize,
+    /// Ctrl/Cmd+F: focus the search box.
+    Find,
     Escape,
 }
 
@@ -101,6 +107,11 @@ enum Command {
     /// Reload the reader stylesheet; `version` makes the URL unique.
     #[serde(rename = "restyle")]
     Restyle { version: u64 },
+    /// Highlight and scroll to the `occurrence`-th match of `query`.
+    #[serde(rename = "find")]
+    Find { query: String, occurrence: usize },
+    #[serde(rename = "clear_find")]
+    ClearFind,
     /// Report which of these element ids is at the top while scrolling.
     #[serde(rename = "track_sections")]
     TrackSections { ids: Vec<String> },
@@ -122,12 +133,17 @@ impl Bridge {
             Scroll::Fragment(id) => Command::Fragment { fragment: Some(id) },
             Scroll::End => Command::End,
             Scroll::Fraction(fraction) => Command::Fraction { fraction },
+            Scroll::Match { query, occurrence } => Command::Find { query, occurrence },
         };
         self.send(command);
     }
 
     pub fn restyle(&self, version: u64) {
         self.send(Command::Restyle { version });
+    }
+
+    pub fn clear_find(&self) {
+        self.send(Command::ClearFind);
     }
 
     pub fn track_sections(&self, ids: Vec<String>) {

@@ -11,6 +11,7 @@ mod error;
 mod href;
 mod opf;
 mod progress;
+mod search;
 mod toc;
 mod xml;
 
@@ -21,5 +22,6 @@ pub use error::{EpubError, Result};
 pub use href::Href;
 pub use opf::Metadata;
 pub use progress::{BookKey, Position, ProgressError, ProgressStore, write_atomic};
+pub use search::{SearchHit, SearchResults};
 pub use toc::{TocEntry, flatten};
 pub use xml::is_well_formed as is_well_formed_xml;

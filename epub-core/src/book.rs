@@ -11,6 +11,7 @@ use zip::result::ZipError;
 use crate::error::{EpubError, Result};
 use crate::href::Href;
 use crate::opf::{self, Metadata};
+use crate::search::{self, SearchResults};
 use crate::toc::{self, TocEntry};
 
 /// Refuse to buffer a single entry larger than this (protects against
@@ -231,6 +232,34 @@ impl<R: Read + Seek> Book<R> {
     /// Media type declared in the manifest for the entry at `path`.
     pub fn media_type(&self, path: &str) -> Option<&str> {
         self.media_types.get(path).map(String::as_str)
+    }
+
+    /// Find `query` in every spine document, in reading order, keeping at
+    /// most `limit` hits. Matching ignores case and treats any run of
+    /// whitespace as one space (see the `search` module for the exact rules).
+    pub fn search(&mut self, query: &str, limit: usize) -> SearchResults {
+        let mut results = SearchResults::default();
+        // Clone the paths first: the loop needs `&mut self` for `read_bytes`.
+        let paths: Vec<String> = self.contents.spine.iter().map(|i| i.path.clone()).collect();
+        for (index, path) in paths.iter().enumerate() {
+            let text = self
+                .read_bytes(path)
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .and_then(|xhtml| search::body_text(&xhtml));
+            let Some(text) = text else {
+                results.skipped.push(path.clone());
+                continue;
+            };
+            for hit in search::search_text(&text, query, index) {
+                if results.hits.len() == limit {
+                    results.truncated = true;
+                    return results;
+                }
+                results.hits.push(hit);
+            }
+        }
+        results
     }
 
     /// Raw bytes of any entry (chapter, CSS, image, font...).

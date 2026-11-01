@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use epub_core::{Book, BookKey, EpubError, Href, TocEntry};
+use epub_core::{Book, BookKey, EpubError, Href, SearchHit, TocEntry};
 
 use crate::bridge::{Bridge, PageEvent, Shortcut};
 use crate::preferences::{LineWidth, MAX_FONT_SCALE, MIN_FONT_SCALE, Preferences, Theme};
@@ -31,6 +31,18 @@ struct OpenedFrom {
     path: PathBuf,
 }
 
+/// A finished search: what was searched and what was found.
+#[derive(Clone, PartialEq)]
+struct SearchState {
+    query: String,
+    /// Each hit with the title of the chapter it is in.
+    hits: Vec<(SearchHit, String)>,
+    truncated: bool,
+}
+
+/// At most this many search hits are listed.
+const SEARCH_LIMIT: usize = 300;
+
 /// Source of unique book ids. An atomic integer can be updated through a
 /// shared reference (`&`), which is all a `static` gives us.
 static NEXT_BOOK_ID: AtomicU64 = AtomicU64::new(1);
@@ -50,6 +62,9 @@ pub fn App() -> Element {
     let mut preferences = use_signal(|| startup.preferences);
     let mut settings_open = use_signal(|| false);
     let mut restyles = use_signal(|| 0_u64);
+    let mut search_query = use_signal(String::new);
+    let mut search = use_signal(|| None::<SearchState>);
+    let mut selected_hit = use_signal(|| None::<usize>);
     let style = use_context::<SharedStyle>();
     let bridge = use_hook(Bridge::start);
 
@@ -73,6 +88,7 @@ pub fn App() -> Element {
 
     // `use_callback` gives a `Copy` handle to a closure, so the same function
     // can be used from several event handlers below.
+    let search_book = shared.clone();
     let open = use_callback(move |path: PathBuf| match open_book(&shared, &path) {
         Ok((mut opened, key)) => {
             // Remember the absolute path, so reopening works from any directory.
@@ -86,6 +102,8 @@ pub fn App() -> Element {
             }
             set_window_title(opened.contents.metadata.title.as_deref());
             opened_from.set(Some(OpenedFrom { key, path }));
+            search.set(None);
+            search_query.set(String::new());
             reader.set(Some(opened));
             error.set(None);
         }
@@ -94,6 +112,67 @@ pub fn App() -> Element {
             path.display(),
             e.full_message()
         ))),
+    });
+
+    // Search the open book (synchronously: a book's text is small) and list
+    // the hits with their chapter titles.
+    let find_bridge = bridge.clone();
+    let run_search = use_callback(move |query: String| {
+        selected_hit.set(None);
+        find_bridge.clear_find();
+        if query.trim().is_empty() {
+            search.set(None);
+            return;
+        }
+        let Some(results) = search_book
+            .lock()
+            .as_mut()
+            .map(|open| open.book.search(&query, SEARCH_LIMIT))
+        else {
+            return;
+        };
+        for path in &results.skipped {
+            eprintln!("justread: search skipped {path} (missing or not well-formed)");
+        }
+        let hits = {
+            let reader = reader.peek();
+            let title = |index: usize| {
+                reader
+                    .as_ref()
+                    .and_then(|r| r.contents.chapter_title(index))
+                    .unwrap_or("")
+                    .to_owned()
+            };
+            results
+                .hits
+                .into_iter()
+                .map(|hit| {
+                    let chapter = title(hit.spine_index);
+                    (hit, chapter)
+                })
+                .collect()
+        };
+        search.set(Some(SearchState {
+            query,
+            hits,
+            truncated: results.truncated,
+        }));
+    });
+
+    // Show hit `i` of the current search in the chapter.
+    let pick_bridge = bridge.clone();
+    let show_hit = use_callback(move |i: usize| {
+        let state = search.peek();
+        let Some((hit, _)) = state.as_ref().and_then(|s| s.hits.get(i)) else {
+            return;
+        };
+        let query = state.as_ref().map(|s| s.query.clone()).unwrap_or_default();
+        selected_hit.set(Some(i));
+        if let Some(r) = reader.write().as_mut()
+            && let Some(scroll) = r.show_match(hit.spine_index, &query, hit.occurrence)
+        {
+            pick_bridge.scroll(scroll);
+        }
     });
 
     // On launch: the book from the command line, else the last one read
@@ -170,7 +249,16 @@ pub fn App() -> Element {
                             font_scale: 100,
                             ..current
                         }),
-                        Shortcut::Escape => settings_open.set(false),
+                        Shortcut::Find => {
+                            document::eval("document.getElementById('search')?.select()");
+                        }
+                        Shortcut::Escape => {
+                            settings_open.set(false);
+                            if search.peek().is_some() {
+                                run_search(String::new());
+                                search_query.set(String::new());
+                            }
+                        }
                     }
                     continue;
                 }
@@ -203,6 +291,10 @@ pub fn App() -> Element {
                             scroll_bridge.track_sections(r.section_ids());
                         }
                         r.on_ready(&path)
+                    }
+                    PageEvent::FindFailed => {
+                        error.set(Some("Couldn't locate that match on the page.".to_owned()));
+                        None
                     }
                     // Handled above, before borrowing the reader.
                     PageEvent::Shortcut { .. } => None,
@@ -304,11 +396,39 @@ pub fn App() -> Element {
                     };
                     rsx! {
                         div { class: "body",
-                            nav { class: "sidebar", aria_label: "Table of contents",
-                                if r.contents.toc.is_empty() {
-                                    p { class: "muted", "This book has no table of contents." }
-                                } else {
-                                    TocList { entries: r.contents.toc.clone(), current, on_select }
+                            nav { class: "sidebar", aria_label: "Table of contents and search",
+                                div { class: "search",
+                                    input {
+                                        id: "search",
+                                        r#type: "search",
+                                        placeholder: "Search in book (Ctrl+F)",
+                                        value: "{search_query}",
+                                        oninput: move |e| search_query.set(e.value()),
+                                        onkeydown: move |e| {
+                                            if e.key() == Key::Enter {
+                                                run_search(search_query());
+                                            }
+                                        },
+                                    }
+                                }
+                                match search() {
+                                    Some(state) => rsx! {
+                                        SearchResultsList {
+                                            state,
+                                            selected: selected_hit(),
+                                            on_pick: show_hit,
+                                            on_close: move |_| {
+                                                search_query.set(String::new());
+                                                run_search(String::new());
+                                            },
+                                        }
+                                    },
+                                    None if r.contents.toc.is_empty() => rsx! {
+                                        p { class: "muted", "This book has no table of contents." }
+                                    },
+                                    None => rsx! {
+                                        TocList { entries: r.contents.toc.clone(), current, on_select }
+                                    },
                                 }
                             }
                             main { class: "page",
@@ -345,6 +465,47 @@ fn BookHeader(reader: Reader) -> Element {
         div { class: "progress", title: "Section {position}",
             span { "{percent}%" }
             div { class: "bar", div { class: "fill", style: "width: {percent}%" } }
+        }
+    }
+}
+
+/// Search results, shown in the sidebar instead of the table of contents.
+#[component]
+fn SearchResultsList(
+    state: SearchState,
+    selected: Option<usize>,
+    on_pick: Callback<usize>,
+    on_close: EventHandler<()>,
+) -> Element {
+    let count = state.hits.len();
+    let summary = match (count, state.truncated) {
+        (0, _) => format!("No matches for “{}”", state.query),
+        (_, true) => format!("First {count} matches for “{}”", state.query),
+        (1, false) => format!("1 match for “{}”", state.query),
+        (_, false) => format!("{count} matches for “{}”", state.query),
+    };
+    rsx! {
+        div { class: "results-header",
+            span { "{summary}" }
+            button { title: "Close search (Esc)", onclick: move |_| on_close.call(()), "✕" }
+        }
+        ul { class: "hits",
+            for (i, (hit, chapter)) in state.hits.into_iter().enumerate() {
+                li { key: "{i}",
+                    button {
+                        class: if selected == Some(i) { "current" } else { "" },
+                        onclick: move |_| on_pick.call(i),
+                        if !chapter.is_empty() {
+                            span { class: "where", "{chapter}" }
+                        }
+                        span { class: "snippet",
+                            "{hit.before}"
+                            mark { "{hit.matched}" }
+                            "{hit.after}"
+                        }
+                    }
+                }
+            }
         }
     }
 }

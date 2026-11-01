@@ -36,6 +36,7 @@
     if (e.key === "+" || e.key === "=") return "bigger";
     if (e.key === "-" || e.key === "_") return "smaller";
     if (e.key === "0") return "reset_size";
+    if (e.key === "f" || e.key === "F") return "find";
     return null;
   };
 
@@ -90,9 +91,117 @@
     timer = setTimeout(reportScroll, 150);
   }, { passive: true });
 
+  // --- Search -----------------------------------------------------------
+  // Must match epub-core/src/search.rs exactly: text of <body> minus
+  // <script>/<style>, whitespace runs folded to one space, each character
+  // lowercased when that stays one character, non-overlapping matches.
+  const SPACE = /[ \t\n\r\f\u00a0\u2000-\u200a\u3000]/;
+  const foldChar = (ch) => {
+    const lower = ch.toLowerCase();
+    return [...lower].length === 1 ? lower : ch;
+  };
+  const fold = (text, onChar) => {
+    // onChar(folded, utf16Offset, utf16Length) per kept character.
+    let offset = 0;
+    for (const ch of text) {
+      if (SPACE.test(ch)) {
+        if (!fold.inSpace) onChar(" ", offset, ch.length);
+        fold.inSpace = true;
+      } else {
+        onChar(foldChar(ch), offset, ch.length);
+        fold.inSpace = false;
+      }
+      offset += ch.length;
+    }
+  };
+  const foldQuery = (query) => {
+    const chars = [];
+    fold.inSpace = false;
+    fold(query, (c) => chars.push(c));
+    while (chars[0] === " ") chars.shift();
+    while (chars[chars.length - 1] === " ") chars.pop();
+    return chars;
+  };
+  const pageText = () => {
+    const chars = [];
+    const where = []; // where[i] = [text node, offset, length] of chars[i]
+    if (!document.body) return { chars, where };
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT | NodeFilter.SHOW_CDATA_SECTION,
+      {
+        acceptNode: (n) =>
+          n.parentElement && n.parentElement.closest("script, style")
+            ? NodeFilter.FILTER_REJECT
+            : NodeFilter.FILTER_ACCEPT,
+      },
+    );
+    fold.inSpace = false;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      fold(node.data, (c, offset, length) => {
+        chars.push(c);
+        where.push([node, offset, length]);
+      });
+    }
+    return { chars, where };
+  };
+  const findRange = (query, occurrence) => {
+    const needle = foldQuery(query);
+    const { chars, where } = pageText();
+    if (!needle.length) return null;
+    let count = 0;
+    let i = 0;
+    while (i + needle.length <= chars.length) {
+      let same = true;
+      for (let j = 0; j < needle.length; j++) {
+        if (chars[i + j] !== needle[j]) { same = false; break; }
+      }
+      if (!same) { i++; continue; }
+      if (count === occurrence) {
+        const [startNode, startOffset] = where[i];
+        const [endNode, endOffset, endLength] = where[i + needle.length - 1];
+        const range = document.createRange();
+        range.setStart(startNode, startOffset);
+        range.setEnd(endNode, endOffset + endLength);
+        return range;
+      }
+      count++;
+      i += needle.length;
+    }
+    return null;
+  };
+  const clearFind = () => {
+    if (window.CSS && CSS.highlights) CSS.highlights.delete("jr-search");
+    else getSelection().removeAllRanges();
+  };
+  const showFind = (query, occurrence) => {
+    clearFind();
+    const range = findRange(query, occurrence);
+    if (!range) {
+      send({ kind: "find_failed" });
+      return;
+    }
+    if (window.CSS && CSS.highlights && window.Highlight) {
+      CSS.highlights.set("jr-search", new Highlight(range));
+    } else {
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    scrollBy(0, range.getBoundingClientRect().top - innerHeight / 3);
+  };
+
   addEventListener("message", (e) => {
     const cmd = e.source === parent && e.data && e.data.justread;
     if (!cmd) return;
+    if (cmd.kind === "find") {
+      showFind(cmd.query, cmd.occurrence);
+      return;
+    }
+    if (cmd.kind === "clear_find") {
+      clearFind();
+      return;
+    }
     if (cmd.kind === "track_sections") {
       sections = cmd.ids;
       reportScroll();

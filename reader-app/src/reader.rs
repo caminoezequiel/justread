@@ -115,6 +115,22 @@ impl Reader {
         None
     }
 
+    /// Show search hit `occurrence` of `query` in spine item `index`: like
+    /// [`Self::go_to`], but scrolling to (and highlighting) the match.
+    pub fn show_match(&mut self, index: usize, query: &str, occurrence: usize) -> Option<Scroll> {
+        let scroll = Scroll::Match {
+            query: query.to_owned(),
+            occurrence,
+        };
+        if index == self.index {
+            self.pending = None;
+            return Some(scroll);
+        }
+        self.go_to(index, None);
+        self.pending = Some(scroll);
+        None
+    }
+
     /// Follow a link clicked inside the chapter (`url_path` is the URL's path,
     /// `hash` its `#fragment`, both still percent-encoded).
     pub fn follow_link(&mut self, url_path: &str, hash: &str) -> Option<Scroll> {
@@ -190,6 +206,11 @@ pub enum Scroll {
     Fragment(String),
     End,
     Fraction(f64),
+    /// The `occurrence`-th search match of `query` (see `epub_core::SearchHit`).
+    Match {
+        query: String,
+        occurrence: usize,
+    },
 }
 
 fn decode_fragment(hash: &str) -> Option<String> {
@@ -290,6 +311,19 @@ mod tests {
             fraction: 0.5,
         });
         assert_eq!(r.index, 0, "out-of-range positions are ignored");
+    }
+
+    #[test]
+    fn search_matches_scroll_now_or_after_loading() {
+        let mut r = reader();
+        let hit = |occurrence| Scroll::Match {
+            query: "q".into(),
+            occurrence,
+        };
+        assert_eq!(r.show_match(0, "q", 2), Some(hit(2)), "same document");
+        assert_eq!(r.show_match(1, "q", 0), None);
+        assert_eq!(r.index, 1);
+        assert_eq!(r.on_ready("/3/b%20c.xhtml"), Some(hit(0)));
     }
 
     #[test]
