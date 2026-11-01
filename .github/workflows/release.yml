@@ -1,0 +1,88 @@
+name: Release
+
+# Run from GitHub: Actions → Release → Run workflow (on main), pick the bump.
+# It sets the new version in reader-app/Cargo.toml, commits it to main, tags
+# that commit, then runs the CI workflow (tests, installers for every OS) on
+# the tag and publishes a GitHub Release with the installers attached.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version to release (current = release the version in Cargo.toml as is, e.g. the first release)"
+        type: choice
+        options: [patch, minor, major, current]
+        default: patch
+
+permissions:
+  contents: write # push the version commit and tag, create the release
+
+# One release at a time; a second click waits instead of racing the first.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Set version and tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Only release from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run the Release workflow on main (it was started on $GITHUB_REF_NAME)."
+          exit 1
+
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Work out the new version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          current=$(sed -n 's/^version = "\(.*\)"/\1/p' reader-app/Cargo.toml | head -1)
+          new=$(bash .github/scripts/next-version.sh "$current" "$BUMP")
+          if git ls-remote --exit-code --tags origin "refs/tags/v$new" >/dev/null; then
+            echo "::error::Tag v$new already exists. Pick a bigger bump (current version: $current)."
+            exit 1
+          fi
+          echo "Releasing $current -> $new"
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "tag=v$new" >> "$GITHUB_OUTPUT"
+
+      - name: Set the version in Cargo.toml and Cargo.lock
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Only the package's own `version = ...` line (the first one).
+          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" reader-app/Cargo.toml
+          # Refresh only the workspace's own entries in the lock file.
+          cargo update --workspace
+          git diff --stat
+
+      - name: Commit, tag and push
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Nothing to commit when releasing the current version as is.
+          if ! git diff --quiet; then
+            git commit -am "Release $TAG"
+          fi
+          git tag -a "$TAG" -m "justread $TAG"
+          # Both or neither: never a tag without its commit on main.
+          git push --atomic origin HEAD:main "refs/tags/$TAG"
+
+  # The usual CI (tests, then installers on Linux, macOS and Windows) on the
+  # tagged commit, finishing with the GitHub Release.
+  ci:
+    name: Build and publish
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+      release_tag: ${{ needs.prepare.outputs.tag }}

@@ -196,18 +196,27 @@ request. For pushes to `main`, tags and manual runs it also builds the
 installers on each OS and attaches them to the run as artifacts
 (`justread-Linux`, `justread-macOS`, `justread-Windows`).
 
-To publish a release, set the new `version` in `reader-app/Cargo.toml`, commit,
-then push a matching tag:
+To publish a release, open the repository on GitHub → **Actions** →
+**Release** → **Run workflow** (on `main`) and pick the version:
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+| Choice | Example |
+|---|---|
+| `patch` | 0.1.0 → 0.1.1 (fixes) |
+| `minor` | 0.1.0 → 0.2.0 (new features) |
+| `major` | 0.4.2 → 1.0.0 |
+| `current` | release the version in `Cargo.toml` as is (e.g. the first release, 0.1.0) |
 
-CI then builds all installers and creates a GitHub Release for the tag with
-them attached (`.deb`, `.rpm`, `.dmg`, `.msi`, `.exe`) and generated release
-notes. A tag that doesn't match the version in `Cargo.toml` fails the release
-job instead of publishing mislabelled files.
+The [Release workflow](.github/workflows/release.yml) sets the new version in
+`reader-app/Cargo.toml`, commits it to `main` as "Release vX.Y.Z", tags it, runs
+the full CI on that tag (tests and installers for every OS), and publishes a
+GitHub Release with the installers attached (`.deb`, `.rpm`, `.dmg`, `.msi`,
+`.exe`) and generated release notes. If any test or installer build fails,
+nothing is published. It refuses a version whose tag already exists.
+
+Pushing a version tag from your computer still works too
+(`git tag v0.2.0 && git push origin v0.2.0`, after setting that version in
+`Cargo.toml`); a tag that doesn't match the version fails instead of
+publishing mislabelled files.
 
 ## Development checks
 
