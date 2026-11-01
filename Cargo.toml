@@ -6,7 +6,12 @@ members = ["epub-core", "reader-app"]
 edition = "2024"
 license = "MIT"
 
-# Smaller, faster release builds (used by `dx bundle --release`).
+# Faster release builds (used by `dx bundle --release`).
+#
+# No `strip = true`: dx builds with its own profile (forcing strip=false)
+# and, if the release profile asks for stripping, strips afterwards with
+# rust-objcopy. In dx 0.7.10 that step fails on macOS ("Library not loaded:
+# @rpath/libLLVM.dylib": dx sets LD_LIBRARY_PATH, macOS needs
+# DYLD_LIBRARY_PATH). Unstripped packages are about 1 MB larger.
 [profile.release]
 lto = "thin"
-strip = true
