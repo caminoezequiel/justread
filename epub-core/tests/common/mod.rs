@@ -6,8 +6,6 @@
 
 use std::path::PathBuf;
 
-use epub_core::TocEntry;
-
 /// Absolute path of a file in `tests/fixtures/`.
 pub fn fixture(name: &str) -> PathBuf {
     // `env!` reads an environment variable at *compile* time; Cargo sets
@@ -15,14 +13,4 @@ pub fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
-}
-
-/// The TOC tree flattened in reading order (parents before children).
-pub fn flatten(entries: &[TocEntry]) -> Vec<&TocEntry> {
-    let mut out = Vec::new();
-    for entry in entries {
-        out.push(entry);
-        out.extend(flatten(&entry.children));
-    }
-    out
 }

@@ -1,5 +1,6 @@
 //! `Book`: an open EPUB file, read lazily from the zip.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::path::Path;
@@ -24,6 +25,64 @@ pub struct SpineItem {
     pub media_type: String,
     /// `false` for `linear="no"` items (e.g. pop-up notes).
     pub linear: bool,
+    /// Uncompressed size in bytes; used to weight reading progress.
+    pub size: u64,
+}
+
+/// Everything known about a book's structure, without access to its files.
+///
+/// It is cheap to `Clone` and holds no file handle, so a UI can keep its own
+/// copy while the `Book` (which owns the zip) lives elsewhere.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Contents {
+    pub metadata: Metadata,
+    pub spine: Vec<SpineItem>,
+    pub toc: Vec<TocEntry>,
+}
+
+impl Contents {
+    /// Index in the spine of the document at `path`, if it is a spine item.
+    pub fn spine_index_of(&self, path: &str) -> Option<usize> {
+        self.spine.iter().position(|item| item.path == path)
+    }
+
+    /// The TOC entry for the spine item at `index`: the first entry that
+    /// points into that document, or else the closest entry before it (a
+    /// chapter split across several files). `None` before the first entry.
+    pub fn toc_entry_for(&self, index: usize) -> Option<&TocEntry> {
+        let mut before = None;
+        for entry in toc::flatten(&self.toc) {
+            let Some(target) = &entry.target else {
+                continue;
+            };
+            match self.spine_index_of(&target.path) {
+                Some(i) if i == index => return Some(entry),
+                Some(i) if i < index => before = Some(entry),
+                _ => {}
+            }
+        }
+        before
+    }
+
+    /// Title to show for the spine item at `index` (see [`Self::toc_entry_for`]).
+    pub fn chapter_title(&self, index: usize) -> Option<&str> {
+        self.toc_entry_for(index).map(|entry| entry.label.as_str())
+    }
+
+    /// Overall progress through the book in `0.0..=1.0`, given the spine
+    /// position and how far through that document the reader has scrolled.
+    /// Documents are weighted by size, so a short cover page counts for little.
+    pub fn progress(&self, index: usize, fraction: f64) -> f64 {
+        // Count every item as at least 1 byte so empty files still advance progress.
+        let weight = |item: &SpineItem| item.size.max(1) as f64;
+        let total: f64 = self.spine.iter().map(weight).sum();
+        let Some(current) = self.spine.get(index) else {
+            return 1.0;
+        };
+        let before: f64 = self.spine[..index].iter().map(weight).sum();
+        let within = weight(current) * fraction.clamp(0.0, 1.0);
+        ((before + within) / total).clamp(0.0, 1.0)
+    }
 }
 
 /// An open EPUB.
@@ -33,9 +92,9 @@ pub struct SpineItem {
 /// must be able to do; `ZipArchive` needs both.
 pub struct Book<R> {
     archive: ZipArchive<R>,
-    metadata: Metadata,
-    spine: Vec<SpineItem>,
-    toc: Vec<TocEntry>,
+    contents: Contents,
+    /// Zip path -> media type, from the manifest.
+    media_types: HashMap<String, String>,
     warnings: Vec<String>,
 }
 
@@ -73,6 +132,8 @@ impl<R: Read + Seek> Book<R> {
                     path: item.path.clone(),
                     media_type: item.media_type.clone(),
                     linear: *linear,
+                    // A missing file is reported later, when it is read.
+                    size: archive.by_name(&item.path).map_or(0, |f| f.size()),
                 }),
                 None => warnings.push(format!("spine refers to unknown manifest id {idref:?}")),
             }
@@ -82,28 +143,40 @@ impl<R: Read + Seek> Book<R> {
         }
 
         let toc = load_toc(&mut archive, &package, &mut warnings);
+        let media_types = package
+            .manifest
+            .into_values()
+            .map(|item| (item.path, item.media_type))
+            .collect();
 
         Ok(Book {
             archive,
-            metadata: package.metadata,
-            spine,
-            toc,
+            contents: Contents {
+                metadata: package.metadata,
+                spine,
+                toc,
+            },
+            media_types,
             warnings,
         })
     }
 
     // Getters return borrowed views (`&T` / `&[T]`): callers can read the data
     // without copying it, and can't modify it.
+    pub fn contents(&self) -> &Contents {
+        &self.contents
+    }
+
     pub fn metadata(&self) -> &Metadata {
-        &self.metadata
+        &self.contents.metadata
     }
 
     pub fn spine(&self) -> &[SpineItem] {
-        &self.spine
+        &self.contents.spine
     }
 
     pub fn toc(&self) -> &[TocEntry] {
-        &self.toc
+        &self.contents.toc
     }
 
     /// Non-fatal problems found while opening the book.
@@ -113,7 +186,12 @@ impl<R: Read + Seek> Book<R> {
 
     /// Index in the spine of the document at `path`, if it is a spine item.
     pub fn spine_index_of(&self, path: &str) -> Option<usize> {
-        self.spine.iter().position(|item| item.path == path)
+        self.contents.spine_index_of(path)
+    }
+
+    /// Media type declared in the manifest for the entry at `path`.
+    pub fn media_type(&self, path: &str) -> Option<&str> {
+        self.media_types.get(path).map(String::as_str)
     }
 
     /// Raw bytes of any entry (chapter, CSS, image, font...).

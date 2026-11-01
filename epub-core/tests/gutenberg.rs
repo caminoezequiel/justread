@@ -4,8 +4,8 @@ mod common;
 
 use std::io::Cursor;
 
-use common::{fixture, flatten};
-use epub_core::{Book, Href};
+use common::fixture;
+use epub_core::{Book, Href, flatten};
 
 const FRANKENSTEIN: &str = "frankenstein-epub3.epub";
 const ALICE: &str = "alice-epub2.epub";
@@ -144,5 +144,60 @@ fn opens_from_memory_like_from_disk() -> anyhow::Result<()> {
     assert_eq!(from_memory.metadata(), from_disk.metadata());
     assert_eq!(from_memory.spine(), from_disk.spine());
     assert_eq!(from_memory.toc(), from_disk.toc());
+    Ok(())
+}
+
+#[test]
+fn chapter_titles_follow_the_toc() -> anyhow::Result<()> {
+    let book = Book::open(fixture(FRANKENSTEIN))?;
+    let contents = book.contents();
+
+    // The cover wrapper comes before any TOC entry.
+    assert_eq!(contents.chapter_title(0), None);
+    // Several entries point into document 1; the first one wins.
+    assert_eq!(contents.chapter_title(1), Some("Frankenstein;"));
+    // Spine item 7 is 84-h-6.htm.xhtml (item 0 is the cover wrapper).
+    assert_eq!(contents.chapter_title(7), Some("Chapter 1"));
+    // Out of range: the last entry before it.
+    assert_eq!(
+        contents.chapter_title(999),
+        Some("THE FULL PROJECT GUTENBERG™ LICENSE")
+    );
+    Ok(())
+}
+
+#[test]
+fn progress_is_size_weighted_and_monotonic() -> anyhow::Result<()> {
+    let book = Book::open(fixture(PETER_RABBIT))?;
+    let contents = book.contents();
+    assert!(contents.spine.iter().all(|item| item.size > 0));
+
+    assert_eq!(contents.progress(0, 0.0), 0.0);
+    assert_eq!(contents.progress(contents.spine.len() - 1, 1.0), 1.0);
+
+    let mut last = 0.0;
+    for index in 0..contents.spine.len() {
+        for fraction in [0.0, 0.5, 1.0] {
+            let p = contents.progress(index, fraction);
+            assert!(p >= last, "progress went backwards at {index}/{fraction}");
+            last = p;
+        }
+    }
+    // The tiny cover wrapper is a small share of the whole book.
+    assert!(contents.progress(1, 0.0) < 0.05);
+    Ok(())
+}
+
+#[test]
+fn media_types_come_from_the_manifest() -> anyhow::Result<()> {
+    let book = Book::open(fixture(PETER_RABBIT))?;
+    let chapter = &book.spine()[1].path;
+
+    assert_eq!(book.media_type(chapter), Some("application/xhtml+xml"));
+    assert_eq!(
+        book.media_type("OEBPS/2102215158318067684_peter04.jpg"),
+        Some("image/jpeg")
+    );
+    assert_eq!(book.media_type("OEBPS/not-there.css"), None);
     Ok(())
 }

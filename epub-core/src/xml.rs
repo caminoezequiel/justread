@@ -43,3 +43,9 @@ pub fn text_of(node: Node) -> String {
         .collect();
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
+
+/// Whether `text` parses as XML. Used to decide whether a chapter can be
+/// served as XHTML or has to fall back to the more forgiving HTML parser.
+pub fn is_well_formed(text: &str) -> bool {
+    parse(text, "").is_ok()
+}

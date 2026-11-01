@@ -3,8 +3,8 @@
 
 mod common;
 
-use common::{fixture, flatten};
-use epub_core::{Book, EpubError, Href};
+use common::fixture;
+use epub_core::{Book, EpubError, Href, flatten};
 
 #[test]
 fn recoverable_problems_become_warnings() -> anyhow::Result<()> {

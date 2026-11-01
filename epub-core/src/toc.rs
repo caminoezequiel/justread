@@ -17,6 +17,16 @@ pub struct TocEntry {
     pub children: Vec<TocEntry>,
 }
 
+/// The TOC tree flattened in reading order (parents before their children).
+pub fn flatten(entries: &[TocEntry]) -> Vec<&TocEntry> {
+    let mut out = Vec::new();
+    for entry in entries {
+        out.push(entry);
+        out.extend(flatten(&entry.children));
+    }
+    out
+}
+
 /// Parse an EPUB3 navigation document located at `nav_path`.
 pub fn parse_nav(text: &str, nav_path: &str) -> Result<Vec<TocEntry>> {
     let doc = xml::parse(text, nav_path)?;

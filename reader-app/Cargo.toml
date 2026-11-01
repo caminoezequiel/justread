@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+dioxus = { version = "=0.7.10", features = ["desktop"] }
+epub-core = { version = "0.1.0", path = "../epub-core" }
+percent-encoding = "=2.3.2"
+rfd = "=0.17.2"
+serde = { version = "=1.0.229", features = ["derive"] }

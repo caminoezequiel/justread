@@ -30,9 +30,10 @@ entry from the zip when it needs it:
 3. The **table of contents** comes from the EPUB3 `nav.xhtml`, or the EPUB2
    `toc.ncx` as a fallback.
 4. In the app, each chapter is shown in an iframe. The iframe loads it from a
-   custom URL (`/book/<path-in-zip>`) that returns the zip entry directly, so
-   the chapter's relative links to stylesheets, images and fonts work without
-   rewriting any HTML.
+   custom URL (`epub://book/<id>/<path-in-zip>`) that returns the zip entry
+   directly, so the chapter's relative links to stylesheets, images and fonts
+   work without rewriting any HTML. A tiny script added to each chapter
+   reports key presses, link clicks and scrolling back to the app.
 
 Broken or unusual books are handled gracefully: bad links, missing files and
 invalid XML produce clear errors or warnings, never a crash.
@@ -50,7 +51,7 @@ The project is built in milestones:
 
 - [x] **1. Core parsing:** open an EPUB, read title, author, spine and TOC; `info` CLI.
 - [x] **2. Tests:** integration tests against real Project Gutenberg books and a deliberately broken EPUB.
-- [ ] **3. Reader UI:** open a file, render chapters, next/previous (buttons and arrow keys), TOC sidebar, progress.
+- [x] **3. Reader UI:** open a file, render chapters, next/previous (buttons and arrow keys), TOC sidebar, progress.
 - [ ] **4. Remember position:** per-book reading position saved and restored; reopen the last book on launch.
 - [ ] **5. Reading comfort:** light, dark and sepia themes, font size, line width.
 - [ ] **6. Packaging:** installable bundles for each OS and CI builds on GitHub Actions.
@@ -63,6 +64,21 @@ needs the WebKitGTK development packages (Ubuntu/Debian):
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev build-essential libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
 ```
+
+Read a book (or start without one and use **Open EPUB**):
+
+```bash
+cargo run -p reader-app -- path/to/book.epub
+```
+
+With hot reload during development (install the CLI once with
+`cargo install dioxus-cli --version 0.7.10 --locked`):
+
+```bash
+dx serve -p reader-app --platform desktop
+```
+
+Keys: <kbd>←</kbd> / <kbd>→</kbd> previous / next section.
 
 Print a book's metadata, reading order and table of contents:
 
