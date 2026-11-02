@@ -7,6 +7,7 @@ use dioxus::prelude::*;
 use epub_core::{Book, BookKey, EpubError, Href, SearchHit, TocEntry};
 
 use crate::bridge::{Bridge, PageEvent, Shortcut};
+use crate::lookup::{Lookup, LookupPopup};
 use crate::preferences::{LineWidth, MAX_FONT_SCALE, MIN_FONT_SCALE, Preferences, Theme};
 use crate::protocol::{OpenBook, SharedBook, SharedStyle};
 use crate::reader::Reader;
@@ -66,7 +67,17 @@ pub fn App() -> Element {
     let mut search = use_signal(|| None::<SearchState>);
     let mut selected_hit = use_signal(|| None::<usize>);
     let style = use_context::<SharedStyle>();
+    let mut lookup = use_signal(|| None::<Lookup>);
     let bridge = use_hook(Bridge::start);
+
+    // Close the translation popup and unmark its word.
+    let lookup_bridge = bridge.clone();
+    let close_lookup = use_callback(move |()| {
+        if lookup.peek().is_some() {
+            lookup.set(None);
+            lookup_bridge.clear_lookup();
+        }
+    });
 
     // Apply new preferences: regenerate the chapter stylesheet (used by every
     // chapter loaded from now on), tell the current chapter to reload it, and
@@ -78,6 +89,9 @@ pub fn App() -> Element {
             return;
         }
         preferences.set(new);
+        if !new.tap_to_translate {
+            close_lookup(());
+        }
         style.set(new.chapter_css());
         restyles += 1;
         restyle_bridge.restyle(restyles());
@@ -268,6 +282,8 @@ pub fn App() -> Element {
                         }
                         Shortcut::Back => go_history(true),
                         Shortcut::Forward => go_history(false),
+                        // The popup first: Esc closes one thing at a time.
+                        Shortcut::Escape if lookup.peek().is_some() => close_lookup(()),
                         Shortcut::Escape => {
                             settings_open.set(false);
                             if search.peek().is_some() {
@@ -277,6 +293,28 @@ pub fn App() -> Element {
                         }
                     }
                     continue;
+                }
+                match event {
+                    PageEvent::Lookup {
+                        text,
+                        before,
+                        after,
+                        rect,
+                        viewport,
+                    } => {
+                        if preferences.peek().tap_to_translate {
+                            lookup.set(Some(Lookup::new(text, before, after, rect, viewport)));
+                            scroll_bridge.mark_lookup();
+                        }
+                        continue;
+                    }
+                    PageEvent::Dismiss => {
+                        close_lookup(());
+                        continue;
+                    }
+                    // Scrolling or changing chapter moves the word away from
+                    // the popup.
+                    _ => close_lookup(()),
                 }
                 let mut guard = reader.write();
                 let Some(r) = guard.as_mut() else {
@@ -324,7 +362,9 @@ pub fn App() -> Element {
                         None
                     }
                     // Handled above, before borrowing the reader.
-                    PageEvent::Shortcut { .. } => None,
+                    PageEvent::Shortcut { .. } | PageEvent::Lookup { .. } | PageEvent::Dismiss => {
+                        None
+                    }
                 };
                 if let Some(scroll) = scroll {
                     scroll_bridge.scroll(scroll);
@@ -474,6 +514,9 @@ pub fn App() -> Element {
                             main { class: "page",
                                 iframe { id: "chapter", title: "Chapter", src: r.chapter_url() }
                             }
+                            if let Some(current) = lookup() {
+                                LookupPopup { lookup: current, on_close: close_lookup }
+                            }
                         }
                     }
                 }
@@ -550,7 +593,7 @@ fn SearchResultsList(
     }
 }
 
-/// The reading-settings panel: theme, text size and line width.
+/// The reading-settings panel: theme, text size, line width and translation.
 #[component]
 fn Settings(preferences: Preferences, on_change: Callback<Preferences>) -> Element {
     let p = preferences;
@@ -602,6 +645,20 @@ fn Settings(preferences: Preferences, on_change: Callback<Preferences>) -> Eleme
                             "aria-pressed": p.line_width == width,
                             onclick: move |_| on_change.call(Preferences { line_width: width, ..p }),
                             "{width.label()}"
+                        }
+                    }
+                }
+            }
+            div { class: "row",
+                span { class: "label", "Translate" }
+                div { class: "choices",
+                    for on in [true, false] {
+                        button {
+                            key: "{on}",
+                            title: "Show the Spanish translation of a clicked word or selected text",
+                            "aria-pressed": p.tap_to_translate == on,
+                            onclick: move |_| on_change.call(Preferences { tap_to_translate: on, ..p }),
+                            if on { "On click" } else { "Off" }
                         }
                     }
                 }

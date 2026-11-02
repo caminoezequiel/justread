@@ -15,7 +15,20 @@ const BRIDGE_JS: &str = r#"
 const frame = () => document.getElementById("chapter");
 addEventListener("message", (e) => {
   const f = frame();
-  if (f && e.source === f.contentWindow && e.data && e.data.justread) dioxus.send(e.data.justread);
+  if (!f || e.source !== f.contentWindow || !e.data || !e.data.justread) return;
+  const msg = e.data.justread;
+  // A word to translate: its place in the window, for positioning the popup.
+  if (msg.kind === "lookup" && msg.rect) {
+    const r = f.getBoundingClientRect();
+    msg.rect = {
+      left: msg.rect.left + r.left,
+      top: msg.rect.top + r.top,
+      right: msg.rect.right + r.left,
+      bottom: msg.rect.bottom + r.top,
+    };
+    msg.viewport = { width: innerWidth, height: innerHeight };
+  }
+  dioxus.send(msg);
 });
 // Ctrl/Cmd + "+"/"=", "-", "0" (text size), Ctrl/Cmd+F (search), Escape
 // and Alt+←/→ (back/forward); reader.js detects the same keys inside the
@@ -96,6 +109,32 @@ pub enum PageEvent {
     Shortcut {
         action: Shortcut,
     },
+    /// A word was clicked or text selected: `text`, with the rest of its
+    /// sentence before and after it, at `rect` in the app window.
+    Lookup {
+        text: String,
+        before: String,
+        after: String,
+        rect: Rect,
+        viewport: Viewport,
+    },
+    /// A click in the chapter that wasn't on a word.
+    Dismiss,
+}
+
+/// A rectangle in CSS pixels of the app window.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+pub struct Rect {
+    pub left: f64,
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+pub struct Viewport {
+    pub width: f64,
+    pub height: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -135,6 +174,11 @@ enum Command {
     /// Report which of these element ids is at the top while scrolling.
     #[serde(rename = "track_sections")]
     TrackSections { ids: Vec<String> },
+    /// Highlight the text of the last `lookup`, or remove that highlight.
+    #[serde(rename = "mark_lookup")]
+    MarkLookup,
+    #[serde(rename = "clear_lookup")]
+    ClearLookup,
 }
 
 /// Handle to the bridge script. Cloning it gives another handle to the same
@@ -170,6 +214,14 @@ impl Bridge {
         self.send(Command::TrackSections { ids });
     }
 
+    pub fn mark_lookup(&self) {
+        self.send(Command::MarkLookup);
+    }
+
+    pub fn clear_lookup(&self) {
+        self.send(Command::ClearLookup);
+    }
+
     fn send(&self, command: Command) {
         if let Err(e) = self.0.send(command) {
             eprintln!("justread: could not send to the chapter: {e}");
@@ -190,5 +242,29 @@ impl Bridge {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_messages_deserialize() -> Result<(), serde_json::Error> {
+        let event: PageEvent = serde_json::from_str(
+            r#"{"kind": "lookup", "text": "ran", "before": "He ", "after": " out.",
+                "rect": {"left": 1, "top": 2, "right": 3, "bottom": 4},
+                "viewport": {"width": 800, "height": 600}}"#,
+        )?;
+        let PageEvent::Lookup { text, rect, .. } = event else {
+            panic!("not a lookup: {event:?}");
+        };
+        assert_eq!(text, "ran");
+        assert_eq!(rect.bottom, 4.0);
+        assert!(matches!(
+            serde_json::from_str(r#"{"kind": "dismiss"}"#)?,
+            PageEvent::Dismiss
+        ));
+        Ok(())
     }
 }

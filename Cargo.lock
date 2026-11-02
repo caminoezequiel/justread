@@ -3673,6 +3673,7 @@ dependencies = [
  "dioxus",
  "directories",
  "epub-core",
+ "flate2",
  "percent-encoding",
  "rfd",
  "serde",

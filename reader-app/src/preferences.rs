@@ -34,6 +34,8 @@ pub struct Preferences {
     /// Text size in percent of the book's own size.
     pub font_scale: u16,
     pub line_width: LineWidth,
+    /// Clicking a word (or selecting text) shows its translation.
+    pub tap_to_translate: bool,
 }
 
 impl Default for Preferences {
@@ -42,6 +44,7 @@ impl Default for Preferences {
             theme: Theme::Light,
             font_scale: 100,
             line_width: LineWidth::Medium,
+            tap_to_translate: true,
         }
     }
 }
@@ -165,6 +168,8 @@ impl Preferences {
         // The current search match (set by reader.js with the CSS Custom
         // Highlight API).
         css += "::highlight(jr-search) { background-color: #ffd54f; color: #1c1c1e; }\n";
+        // The word being translated: translucent, so it works on any theme.
+        css += "::highlight(jr-lookup) { background-color: rgba(66, 133, 244, 0.3); }\n";
 
         if self.font_scale != 100 {
             // Books size text in em/% almost everywhere, so scaling the root
@@ -213,6 +218,7 @@ mod tests {
         assert!(css.contains("max-width: 40em"));
         assert!(!css.contains("font-size"));
         assert!(!css.contains("background:"), "no theme colors");
+        assert!(css.contains("::highlight(jr-lookup)"));
     }
 
     #[test]
@@ -221,6 +227,7 @@ mod tests {
             theme: Theme::Dark,
             font_scale: 130,
             line_width: LineWidth::Full,
+            tap_to_translate: false,
         };
         let css = prefs.chapter_css();
         assert!(css.contains("font-size: 130% !important"));
@@ -254,7 +261,7 @@ mod tests {
         })?;
         assert_eq!(
             json,
-            r#"{"theme":"sepia","font_scale":100,"line_width":"medium"}"#
+            r#"{"theme":"sepia","font_scale":100,"line_width":"medium","tap_to_translate":true}"#
         );
         let partial: Preferences = serde_json::from_str(r#"{"theme":"dark"}"#)?;
         assert_eq!(

@@ -126,3 +126,36 @@ button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
 
 .page { flex: 1; display: flex; min-width: 0; background: var(--page); }
 .page iframe { flex: 1; border: none; width: 100%; height: 100%; }
+
+/* Translation popup (lookup.rs). `position: fixed`: its coordinates are the
+   clicked word's place in the window; the width matches WIDTH in lookup.rs. */
+.lookup {
+  position: fixed; z-index: 20; width: 360px; box-sizing: border-box; overflow-y: auto;
+  padding: 10px 14px 8px; color: var(--text);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+}
+.lookup-head { display: flex; align-items: center; gap: 8px; }
+.lookup-head .query { flex: 1; font-size: 16px; font-weight: 600; }
+.lookup .entry { margin-top: 8px; }
+.lookup .headword { color: var(--accent); font-weight: 600; }
+.lookup ol { margin: 4px 0 0; padding-left: 20px; }
+.lookup li { margin: 3px 0; line-height: 1.35; }
+.lookup .spanish { font-weight: 600; }
+.lookup .pos { color: var(--muted); font-size: 11px; font-style: italic; }
+.lookup .sense { color: var(--muted); font-size: 12px; }
+.lookup .sentence {
+  margin: 10px 0 0; padding: 6px 8px; border-left: 3px solid var(--accent);
+  background: var(--selected); font-family: Georgia, serif; line-height: 1.4;
+}
+.lookup .more {
+  margin: 2px 0 0 20px; padding: 0; border: none; background: none;
+  color: var(--accent); font-size: 12px; cursor: pointer;
+}
+/* Kept in view at the bottom of the popup while the entries scroll. */
+.lookup .actions {
+  position: sticky; bottom: -8px; display: flex; gap: 6px;
+  margin: 10px -14px 0; padding: 8px 14px; background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+.lookup .credit { margin: 4px 0 0; color: var(--muted); font-size: 10px; }

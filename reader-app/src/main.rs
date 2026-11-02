@@ -8,7 +8,10 @@
 
 mod app;
 mod bridge;
+mod dictionary;
+mod google;
 mod history;
+mod lookup;
 mod preferences;
 mod protocol;
 mod reader;
@@ -19,6 +22,9 @@ use std::path::PathBuf;
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder, icon_from_memory};
 
 fn main() {
+    // Decompress the dictionary in the background, so the first word clicked
+    // doesn't wait for it.
+    std::thread::spawn(dictionary::Dictionary::shared);
     let shared = protocol::SharedBook::default();
     let data_dir = storage::data_dir();
     let preferences_file = data_dir.as_ref().map(|dir| dir.join("preferences.json"));
@@ -38,6 +44,11 @@ fn main() {
     // `move` closure takes ownership of those clones.
     let handler_book = shared.clone();
     let handler_style = style.clone();
+    let google_requests = google::GoogleRequests::default();
+    let mut google_window = google::GoogleWindow::new(
+        google_requests.clone(),
+        data_dir.as_ref().map(|dir| dir.join("google-webview")),
+    );
     let mut config = Config::new()
         .with_window(
             WindowBuilder::new()
@@ -53,7 +64,10 @@ fn main() {
         .with_custom_head(format!("<style>{}</style>", include_str!("style.css")))
         .with_custom_protocol(protocol::SCHEME, move |_webview, request| {
             protocol::handle(&handler_book, &handler_style, &request)
-        });
+        })
+        // Runs for every event of the loop, with what it takes to create
+        // windows: the Google Translate one lives outside Dioxus.
+        .with_custom_event_handler(move |event, target| google_window.handle_event(event, target));
     // Window/taskbar icon. Installed bundles also carry the icons from
     // Dioxus.toml; this covers `cargo run` and X11/Windows title bars.
     match icon_from_memory(include_bytes!("../icons/256x256.png")) {
@@ -66,5 +80,6 @@ fn main() {
         .with_context(shared)
         .with_context(style)
         .with_context(startup)
+        .with_context(google_requests)
         .launch(app::App);
 }

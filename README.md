@@ -31,6 +31,12 @@ justread has two goals:
 - Current chapter title and overall progress (weighted by chapter length).
 - Remembers your exact place in every book, and reopens the last book on launch.
 - Light, sepia and dark themes, text size and line width, applied instantly.
+- **Tap to translate (English → Spanish)**, for learning English while reading:
+  click a word, or select a few, to see its Spanish meanings from an offline
+  dictionary. It recognises inflected forms (ran → run) and phrasal verbs and
+  idioms from the words that follow ("ran out of time" → *run out*: agotar,
+  quedarse sin). **Translate sentence** opens the whole sentence in Google
+  Translate, in a window of its own.
 - Broken or unusual books open whenever possible; problems show as clear
   messages, never a crash.
 
@@ -52,7 +58,8 @@ justread path/to/book.epub
 | Reading settings | **Aa** button: theme (light keeps the book's own colors), text size 60–200%, line width |
 | Text size | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>+</kbd> / <kbd>−</kbd>, <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>0</kbd> to reset |
 | Search | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd>, type, <kbd>Enter</kbd>; click a result to jump to it |
-| Close search / settings | <kbd>Esc</kbd> |
+| Translate a word | Click it; select text to translate a phrase. **Translate sentence ↗** opens Google Translate. Turn it off in **Aa** → Translate |
+| Close the translation, search or settings | <kbd>Esc</kbd> |
 
 **Reading position** is saved as you read, per book, in `progress.json`;
 **settings** are saved in `preferences.json`. Both live in your data folder:
@@ -67,11 +74,20 @@ Books are recognised by their content (a SHA-256 of the file), so moving or
 renaming a file keeps its place. To use a different folder (for example while
 testing), set `JUSTREAD_DATA_DIR`.
 
+**Translation and privacy:** the dictionary is built into the app and works
+offline; nothing leaves your computer when you click a word. Only the text you
+send with a **Translate ↗** button goes to Google. The Google window keeps its
+cookies (for its consent screen) in `google-webview` inside the data folder.
+The dictionary comes from the English Wiktionary, under CC BY-SA 4.0 (see
+[reader-app/dictionary](reader-app/dictionary/README.md)).
+
 ### Known limitations
 
 - DRM-protected books (encrypted with `META-INF/encryption.xml`) can't be read.
 - Text size has no effect on books that set font sizes in fixed `px` units.
 - The installers are not code-signed (see [Packaging](#packaging)).
+- The dictionary is word-level: it lists every sense of a word (the most common
+  first) and can't tell which one the sentence uses; Google Translate can.
 - Search skips chapters that aren't well-formed XHTML (they still display),
   and result snippets can run words together where the book separates them
   only by layout (for example in an index).
@@ -93,11 +109,15 @@ entry from the zip when it needs it:
    work without rewriting any HTML.
 5. Two small files are added to each chapter: a stylesheet generated from your
    reading settings (theme, text size, line width), and a script that reports
-   key presses, link clicks, scrolling and the current section back to the
-   app, and finds and highlights search matches.
+   key presses, link clicks, scrolling, the current section and clicked words
+   (with their sentence) back to the app, and finds and highlights search
+   matches.
 6. Search reads the text of every chapter from the zip and counts matches per
    chapter; the chapter script finds "the n-th match" in the rendered page
    using exactly the same rules, so the highlight lands on the right one.
+7. Translation looks the clicked word up in a dictionary embedded in the
+   binary (a compressed subset of Wiktionary). Google Translate can't be shown
+   in an iframe, so it gets a separate native window.
 
 Broken or unusual books are handled gracefully: bad links, missing files and
 invalid XML produce clear errors or warnings, never a crash.
@@ -243,4 +263,6 @@ justread was built in milestones:
 5. **Reading comfort:** light, dark and sepia themes, text size, line width.
 6. **Packaging:** installable bundles for each OS and CI builds on GitHub Actions.
 7. **Extras:** search, sidebar that follows the current section, text-size
-   shortcuts, releases from version tags.
+   shortcuts, releases from version tags, back/forward history.
+8. **Learning English:** tap-to-translate with an offline dictionary and
+   Google Translate for sentences.

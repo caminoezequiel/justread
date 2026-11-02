@@ -4,8 +4,9 @@
 // can't reach into it. This script talks to the app with postMessage instead:
 // it turns pages, asks the app to change chapter at either end, reports
 // in-book link clicks, scrolling and when the page is ready, scrolls to a
-// fragment, the end, or a saved position when the app asks, and swaps in a
-// new reader stylesheet when preferences change.
+// fragment, the end, or a saved position when the app asks, swaps in a
+// new reader stylesheet when preferences change, and sends clicked words and
+// selections for translation.
 (() => {
   const send = (msg) => parent.postMessage({ justread: msg }, "*");
   const root = document.documentElement;
@@ -71,7 +72,10 @@
   // Other links (http:, mailto:) keep their default behaviour.
   document.addEventListener("click", (e) => {
     const a = e.target.closest && e.target.closest("a[href]");
-    if (!a) return;
+    if (!a) {
+      lookupAt(e);
+      return;
+    }
     const url = new URL(a.getAttribute("href"), location.href);
     if (url.protocol !== location.protocol || url.host !== location.host) return;
     e.preventDefault();
@@ -110,6 +114,155 @@
     clearTimeout(timer);
     timer = setTimeout(reportScroll, 150);
   }, { passive: true });
+
+  // --- Tap to translate -------------------------------------------------
+  // A click on a word, or a mouse selection, sends the text with the rest of
+  // its sentence (`before`/`after`) and where it is on screen; the app shows
+  // the translation and asks for the text to be marked (`mark_lookup`).
+  const WORD_CHAR = /[\p{L}\p{M}\p{N}'’-]/u;
+  const EDGE = /['’-]/;
+  const BLOCK = "p, li, blockquote, dd, dt, td, th, h1, h2, h3, h4, h5, h6, figcaption, pre";
+  let lookupRange = null;
+  const squash = (text) => text.replace(/\s+/g, " ");
+
+  // The text position under the pointer (WebKit/Chromium, then Firefox's API).
+  const caretAt = (x, y) => {
+    if (document.caretRangeFromPoint) {
+      const r = document.caretRangeFromPoint(x, y);
+      return r && [r.startContainer, r.startOffset];
+    }
+    if (document.caretPositionFromPoint) {
+      const p = document.caretPositionFromPoint(x, y);
+      return p && [p.offsetNode, p.offset];
+    }
+    return null;
+  };
+  const wordAt = (x, y) => {
+    const caret = caretAt(x, y);
+    if (!caret || caret[0].nodeType !== Node.TEXT_NODE) return null;
+    const [node, offset] = caret;
+    const text = node.data;
+    let start = offset;
+    let end = offset;
+    while (start > 0 && WORD_CHAR.test(text[start - 1])) start--;
+    while (end < text.length && WORD_CHAR.test(text[end])) end++;
+    while (start < end && EDGE.test(text[start])) start++;
+    while (end > start && EDGE.test(text[end - 1])) end--;
+    if (start === end) return null;
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    // The caret snaps to the nearest text even from the margin: only a click
+    // on the word itself counts.
+    const hit = [...range.getClientRects()].some(
+      (r) => x >= r.left - 1 && x <= r.right + 1 && y >= r.top - 1 && y <= r.bottom + 1,
+    );
+    return hit ? range : null;
+  };
+
+  // The sentence around `range`, within its paragraph (or similar block).
+  const sentenceAround = (range) => {
+    const parent = range.startContainer.parentElement || document.body;
+    const block = parent.closest(BLOCK) || parent;
+    const lead = document.createRange();
+    lead.selectNodeContents(block);
+    lead.setEnd(range.startContainer, range.startOffset);
+    const text = block.textContent;
+    const start = lead.toString().length;
+    const end = Math.min(text.length, start + range.toString().length);
+    let from = 0;
+    let to = text.length;
+    if (window.Intl && Intl.Segmenter) {
+      for (const s of new Intl.Segmenter("en", { granularity: "sentence" }).segment(text)) {
+        const sEnd = s.index + s.segment.length;
+        if (sEnd <= start) from = sEnd;
+        if (s.index >= end) {
+          to = s.index;
+          break;
+        }
+      }
+    } else {
+      const stops = /[.!?]+["”’)\]]*\s/g;
+      for (let m = stops.exec(text); m; m = stops.exec(text)) {
+        const stop = m.index + m[0].length;
+        if (stop <= start) from = stop;
+        else if (m.index >= end) {
+          to = stop;
+          break;
+        }
+      }
+    }
+    return {
+      before: squash(text.slice(from, start)).trimStart(),
+      after: squash(text.slice(end, to)).trimEnd(),
+    };
+  };
+
+  // A selection that starts or ends inside a word takes the whole word.
+  const toWholeWords = (range) => {
+    const start = range.startContainer;
+    if (start.nodeType === Node.TEXT_NODE) {
+      let i = range.startOffset;
+      while (i > 0 && WORD_CHAR.test(start.data[i - 1])) i--;
+      range.setStart(start, i);
+    }
+    const end = range.endContainer;
+    if (end.nodeType === Node.TEXT_NODE) {
+      let i = range.endOffset;
+      while (i < end.data.length && WORD_CHAR.test(end.data[i])) i++;
+      range.setEnd(end, i);
+    }
+    return range;
+  };
+
+  const sendLookup = (range) => {
+    const text = squash(range.toString()).trim();
+    if (!text || text.length > 1000) return;
+    // Already shown (a selection can end with several mouseups).
+    if (
+      lookupRange &&
+      range.compareBoundaryPoints(Range.START_TO_START, lookupRange) === 0 &&
+      range.compareBoundaryPoints(Range.END_TO_END, lookupRange) === 0
+    ) {
+      return;
+    }
+    lookupRange = range;
+    const r = range.getBoundingClientRect();
+    send({
+      kind: "lookup",
+      text,
+      ...sentenceAround(range),
+      rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
+    });
+  };
+
+  const lookupAt = (e) => {
+    // A click that ends a selection: handled by the mouseup below.
+    if (!getSelection().isCollapsed || e.button !== 0) return;
+    const range = wordAt(e.clientX, e.clientY);
+    if (range) sendLookup(range);
+    else send({ kind: "dismiss" });
+  };
+  addEventListener("mouseup", (e) => {
+    if (e.button !== 0) return;
+    // After the browser has updated the selection.
+    setTimeout(() => {
+      const selection = getSelection();
+      if (!selection.isCollapsed && selection.rangeCount) {
+        sendLookup(toWholeWords(selection.getRangeAt(0).cloneRange()));
+      }
+    }, 0);
+  });
+
+  const markLookup = () => {
+    if (lookupRange && window.CSS && CSS.highlights && window.Highlight) {
+      CSS.highlights.set("jr-lookup", new Highlight(lookupRange));
+    }
+  };
+  const clearLookup = () => {
+    if (window.CSS && CSS.highlights) CSS.highlights.delete("jr-lookup");
+    lookupRange = null;
+  };
 
   // --- Search -----------------------------------------------------------
   // Must match epub-core/src/search.rs exactly: text of <body> minus
@@ -220,6 +373,14 @@
     }
     if (cmd.kind === "clear_find") {
       clearFind();
+      return;
+    }
+    if (cmd.kind === "mark_lookup") {
+      markLookup();
+      return;
+    }
+    if (cmd.kind === "clear_lookup") {
+      clearLookup();
       return;
     }
     if (cmd.kind === "track_sections") {
