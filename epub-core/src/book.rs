@@ -12,7 +12,7 @@ use crate::error::{EpubError, Result};
 use crate::href::Href;
 use crate::opf::{self, Metadata};
 use crate::search::{self, SearchResults};
-use crate::toc::{self, TocEntry};
+use crate::toc::{self, PageTarget, TocEntry};
 
 /// Refuse to buffer a single entry larger than this (protects against
 /// zip entries whose header claims a huge size).
@@ -40,6 +40,9 @@ pub struct Contents {
     pub metadata: Metadata,
     pub spine: Vec<SpineItem>,
     pub toc: Vec<TocEntry>,
+    /// The printed pages (EPUB `page-list`), in reading order; empty if the
+    /// book has none.
+    pub pages: Vec<PageTarget>,
 }
 
 impl Contents {
@@ -86,6 +89,51 @@ impl Contents {
             }
         }
         ids
+    }
+
+    /// Fragment ids of the page-list targets that start in the spine item at
+    /// `index`, in order: the page anchors a reader can pass while scrolling.
+    pub fn page_ids(&self, index: usize) -> Vec<String> {
+        let Some(item) = self.spine.get(index) else {
+            return Vec::new();
+        };
+        self.pages
+            .iter()
+            .filter_map(|page| match &page.target {
+                Href {
+                    path,
+                    fragment: Some(id),
+                } if *path == item.path => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The page being read (1-based index into `pages`) in the spine item at
+    /// `index`: the last page-list target reached. `anchor` is the last page
+    /// anchor the reader has scrolled past in that item. A target without a
+    /// fragment is reached as soon as its document is. `None` before the
+    /// first target.
+    pub fn page_number(&self, index: usize, anchor: Option<&str>) -> Option<usize> {
+        let path = &self.spine.get(index)?.path;
+        let anchor_at = anchor.and_then(|id| {
+            self.pages.iter().position(|page| {
+                page.target.path == *path && page.target.fragment.as_deref() == Some(id)
+            })
+        });
+        let mut reached = None;
+        for (n, page) in self.pages.iter().enumerate() {
+            let Some(i) = self.spine_index_of(&page.target.path) else {
+                continue;
+            };
+            let is_reached = i < index
+                || (i == index
+                    && (page.target.fragment.is_none() || anchor_at.is_some_and(|at| n <= at)));
+            if is_reached {
+                reached = Some(n + 1);
+            }
+        }
+        reached
     }
 
     /// The TOC entry for a position: the entry for `section` (a fragment id
@@ -183,6 +231,7 @@ impl<R: Read + Seek> Book<R> {
         }
 
         let toc = load_toc(&mut archive, &package, &mut warnings);
+        let pages = load_page_list(&mut archive, &package);
         let media_types = package
             .manifest
             .into_values()
@@ -195,6 +244,7 @@ impl<R: Read + Seek> Book<R> {
                 metadata: package.metadata,
                 spine,
                 toc,
+                pages,
             },
             media_types,
             warnings,
@@ -311,4 +361,95 @@ fn load_toc<R: Read + Seek>(
         }
     }
     Vec::new()
+}
+
+/// The page list from the EPUB3 nav document, else from the NCX. A book
+/// without one is normal, so nothing is reported when it can't be read.
+fn load_page_list<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    package: &opf::Package,
+) -> Vec<PageTarget> {
+    if let Some(nav) = package.nav_item()
+        && let Ok(pages) =
+            read_string(archive, &nav.path).and_then(|t| toc::parse_nav_pages(&t, &nav.path))
+        && !pages.is_empty()
+    {
+        return pages;
+    }
+    if let Some(ncx) = package.ncx_item()
+        && let Ok(pages) =
+            read_string(archive, &ncx.path).and_then(|t| toc::parse_ncx_pages(&t, &ncx.path))
+    {
+        return pages;
+    }
+    Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::toc::PageTarget;
+
+    fn item(path: &str) -> SpineItem {
+        SpineItem {
+            id: path.into(),
+            path: path.into(),
+            media_type: "application/xhtml+xml".into(),
+            linear: true,
+            size: 100,
+        }
+    }
+
+    fn page(path: &str, fragment: Option<&str>, label: &str) -> PageTarget {
+        PageTarget {
+            label: label.into(),
+            target: Href {
+                path: path.into(),
+                fragment: fragment.map(String::from),
+            },
+        }
+    }
+
+    fn contents() -> Contents {
+        Contents {
+            metadata: Metadata::default(),
+            spine: vec![item("a.xhtml"), item("b.xhtml")],
+            toc: Vec::new(),
+            pages: vec![
+                page("a.xhtml", None, "1"),
+                page("a.xhtml", Some("p2"), "2"),
+                page("b.xhtml", Some("p3"), "3"),
+                page("b.xhtml", Some("p4"), "4"),
+            ],
+        }
+    }
+
+    #[test]
+    fn page_number_follows_the_anchors_passed() {
+        let c = contents();
+        // Top of a.xhtml: the page without a fragment.
+        assert_eq!(c.page_number(0, None), Some(1));
+        assert_eq!(c.page_number(0, Some("p2")), Some(2));
+        // Scrolled into b.xhtml before its first anchor: last page of a.
+        assert_eq!(c.page_number(1, None), Some(2));
+        assert_eq!(c.page_number(1, Some("p4")), Some(4));
+    }
+
+    #[test]
+    fn no_page_before_the_first_target() {
+        let c = Contents {
+            pages: vec![page("b.xhtml", Some("p3"), "3")],
+            ..contents()
+        };
+        assert_eq!(c.page_number(0, None), None);
+        assert_eq!(c.page_number(1, None), None);
+        assert_eq!(c.page_number(1, Some("p3")), Some(1));
+    }
+
+    #[test]
+    fn page_ids_are_the_anchors_of_one_document() {
+        let c = contents();
+        assert_eq!(c.page_ids(0), ["p2"]);
+        assert_eq!(c.page_ids(1), ["p3", "p4"]);
+    }
 }

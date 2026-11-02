@@ -86,16 +86,17 @@
       from: location.pathname,
       fraction: fraction(),
       section: currentSection(),
+      page: currentPage(),
     });
   });
 
-  // TOC sections in this document (ids, sent by the app once loaded). The
-  // current one is the last heading scrolled past the top third of the screen.
-  let sections = [];
-  const currentSection = () => {
+  // The last of `ids` (element ids, sent by the app once loaded) scrolled
+  // past the top third of the screen, or null. Used for TOC sections and for
+  // the page-list anchors.
+  const lastPassed = (ids) => {
     let current = null;
     let best = -Infinity;
-    for (const id of sections) {
+    for (const id of ids) {
       const el = document.getElementById(id) || document.getElementsByName(id)[0];
       if (!el) continue;
       const top = el.getBoundingClientRect().top;
@@ -106,8 +107,20 @@
     }
     return current;
   };
+  // TOC sections in this document: the current one is the last heading passed.
+  let sections = [];
+  const currentSection = () => lastPassed(sections);
+  // Page-list anchors in this document (see `track_pages`).
+  let pageIds = [];
+  const currentPage = () => lastPassed(pageIds);
   const reportScroll = () =>
-    send({ kind: "scroll", path: location.pathname, fraction: fraction(), section: currentSection() });
+    send({
+      kind: "scroll",
+      path: location.pathname,
+      fraction: fraction(),
+      section: currentSection(),
+      page: currentPage(),
+    });
 
   let timer = null;
   addEventListener("scroll", () => {
@@ -385,6 +398,9 @@
     }
     if (cmd.kind === "track_sections") {
       sections = cmd.ids;
+      reportScroll();
+    } else if (cmd.kind === "track_pages") {
+      pageIds = cmd.ids;
       reportScroll();
     } else if (cmd.kind === "page") {
       // Arrow keys pressed while the app window (not the chapter) had focus.

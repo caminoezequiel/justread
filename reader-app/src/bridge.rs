@@ -93,6 +93,9 @@ pub enum PageEvent {
         fraction: f64,
         #[serde(default)]
         section: Option<String>,
+        /// Last page anchor passed in `from`, if any.
+        #[serde(default)]
+        page: Option<String>,
     },
     Scroll {
         path: String,
@@ -100,6 +103,9 @@ pub enum PageEvent {
         /// Id of the TOC section at the top of the screen, if any.
         #[serde(default)]
         section: Option<String>,
+        /// Last page-list anchor passed (see `track_pages`), if any.
+        #[serde(default)]
+        page: Option<String>,
     },
     Ready {
         path: String,
@@ -107,6 +113,12 @@ pub enum PageEvent {
     /// The outline of a PDF (its TOC), sent before `ready`.
     Outline {
         entries: Vec<OutlineItem>,
+    },
+    /// The PDF page at the middle of the window (1-based) out of `count`.
+    Page {
+        path: String,
+        number: usize,
+        count: usize,
     },
     /// The chapter couldn't locate a search hit it was asked to show.
     FindFailed,
@@ -179,6 +191,9 @@ enum Command {
     /// Report which of these element ids is at the top while scrolling.
     #[serde(rename = "track_sections")]
     TrackSections { ids: Vec<String> },
+    /// Report which of these page-list anchor ids has been scrolled past.
+    #[serde(rename = "track_pages")]
+    TrackPages { ids: Vec<String> },
     /// Highlight the text of the last `lookup`, or remove that highlight.
     #[serde(rename = "mark_lookup")]
     MarkLookup,
@@ -220,6 +235,10 @@ impl Bridge {
 
     pub fn track_sections(&self, ids: Vec<String>) {
         self.send(Command::TrackSections { ids });
+    }
+
+    pub fn track_pages(&self, ids: Vec<String>) {
+        self.send(Command::TrackPages { ids });
     }
 
     pub fn mark_lookup(&self) {

@@ -20,6 +20,7 @@ let observer = null;
 let fitWidth = 0; // CSS pixels of a page at 100% zoom
 let zoom = 1;
 const pages = [];
+let shownPage = 0; // the last page reported to the app (1-based)
 
 // Page index (0-based) a destination points at, or null.
 const pageOf = async (doc, dest) => {
@@ -142,7 +143,31 @@ const setZoom = (scale) => {
   }
   const newMax = document.documentElement.scrollHeight - innerHeight;
   scrollTo(0, fraction * newMax);
+  reportPage();
 };
+
+// The page at the middle of the window (1-based), sent when it changes. The
+// last page whose top is above the middle is the one being read.
+const reportPage = () => {
+  let number = 1;
+  for (let index = 0; index < pages.length; index++) {
+    if (pages[index].box.getBoundingClientRect().top > innerHeight / 2) break;
+    number = index + 1;
+  }
+  if (number === shownPage) return;
+  shownPage = number;
+  send({ kind: "page", path: location.pathname, number, count: pages.length });
+};
+
+// Scrolling fires many events; check once per frame.
+let pageFrame = 0;
+addEventListener("scroll", () => {
+  if (pageFrame) return;
+  pageFrame = requestAnimationFrame(() => {
+    pageFrame = 0;
+    reportPage();
+  });
+});
 
 addEventListener("message", (e) => {
   const cmd = e.source === parent && e.data && e.data.justread;
@@ -166,6 +191,7 @@ const main = async () => {
     pages.push({ page, box, base: page.getViewport({ scale: 1 }), scale: 1, rendered: false, version: 0 });
   }
   layout();
+  reportPage();
 
   // Render pages as they approach the screen, not all up front.
   observer = new IntersectionObserver(

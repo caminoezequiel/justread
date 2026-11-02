@@ -36,6 +36,7 @@ pub fn contents(path: &Path, size: u64) -> Contents {
             size,
         }],
         toc: Vec::new(),
+        pages: Vec::new(),
     }
 }
 

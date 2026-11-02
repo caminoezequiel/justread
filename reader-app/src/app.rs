@@ -11,7 +11,7 @@ use crate::lookup::{Lookup, LookupPopup};
 use crate::pdf;
 use crate::preferences::{LineWidth, MAX_FONT_SCALE, MIN_FONT_SCALE, Preferences, Theme};
 use crate::protocol::{OpenBook, SharedBook, SharedStyle, Source};
-use crate::reader::Reader;
+use crate::reader::{PageNumber, Reader};
 use crate::storage;
 
 /// Settings decided in `main` before the window opens.
@@ -343,23 +343,35 @@ pub fn App() -> Element {
                         from,
                         fraction,
                         section,
+                        page,
                     } => {
                         // Exactly where the link was clicked, so Back
                         // returns there.
                         r.on_scroll(&from, fraction, section);
+                        r.on_page_anchor(&from, page);
                         r.follow_link(&path, &hash)
                     }
                     PageEvent::Scroll {
                         path,
                         fraction,
                         section,
+                        page,
                     } => {
                         r.on_scroll(&path, fraction, section);
+                        r.on_page_anchor(&path, page);
                         None
                     }
                     // A PDF's outline becomes its TOC (sent before `ready`).
                     PageEvent::Outline { entries } => {
                         r.contents.toc = pdf::toc(&entries);
+                        None
+                    }
+                    PageEvent::Page {
+                        path,
+                        number,
+                        count,
+                    } => {
+                        r.on_page(&path, number, count);
                         None
                     }
                     PageEvent::Ready { path } => {
@@ -370,6 +382,7 @@ pub fn App() -> Element {
                             // size before the saved position is applied.
                             scroll_bridge.zoom(zoom_of(preferences.peek().font_scale));
                             scroll_bridge.track_sections(r.section_ids());
+                            scroll_bridge.track_pages(r.page_ids());
                         }
                         r.on_ready(&path)
                     }
@@ -561,6 +574,16 @@ fn BookHeader(reader: Reader) -> Element {
     let chapter = reader.chapter_title().unwrap_or("");
     let percent = (reader.progress() * 100.0).round();
     let position = format!("{} / {}", reader.index + 1, reader.contents.spine.len());
+    // A PDF or a book with a page list has real pages; otherwise the page is
+    // estimated (and says so), which is only shown once the book has no pages.
+    let page_label = match reader.page() {
+        Some(PageNumber { number, count }) => Some(format!("page {number}/{count}")),
+        None if reader.contents.pages.is_empty() => {
+            let PageNumber { number, count } = reader.estimated_page();
+            Some(format!("~page {number}/{count}"))
+        }
+        None => None,
+    };
 
     rsx! {
         div { class: "book",
@@ -573,6 +596,9 @@ fn BookHeader(reader: Reader) -> Element {
             div { class: "chapter", "{chapter}" }
         }
         div { class: "progress", title: "Section {position}",
+            if let Some(label) = page_label {
+                span { class: "page", "{label}" }
+            }
             span { "{percent}%" }
             div { class: "bar", div { class: "fill", style: "width: {percent}%" } }
         }

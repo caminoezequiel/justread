@@ -18,6 +18,11 @@ pub struct Reader {
     /// The TOC section (fragment id) currently at the top of the screen, as
     /// reported by the chapter; `None` before its first section heading.
     pub section: Option<String>,
+    /// The page being read in a PDF, as its viewer reports it.
+    pdf_page: Option<PageNumber>,
+    /// The last page anchor the current chapter scrolled past, with the
+    /// spine index it belongs to (see `Contents::page_number`).
+    page_anchor: Option<(usize, String)>,
     /// Where to scroll once the newly loaded document reports ready.
     pending: Option<Scroll>,
     /// Places left by jumps, for Back/Forward.
@@ -36,6 +41,8 @@ impl Reader {
             index: 0,
             fraction: 0.0,
             section: None,
+            pdf_page: None,
+            page_anchor: None,
             pending: None,
             history: History::default(),
             in_search: false,
@@ -231,6 +238,58 @@ impl Reader {
         }
     }
 
+    /// A PDF page came to the middle of the window. Ignored for documents
+    /// that aren't current, like `on_scroll`.
+    pub fn on_page(&mut self, url_path: &str, number: usize, count: usize) {
+        if self.is_current(url_path) {
+            self.pdf_page = Some(PageNumber { number, count });
+        }
+    }
+
+    /// The chapter scrolled past page anchor `anchor` (`None`: none yet).
+    pub fn on_page_anchor(&mut self, url_path: &str, anchor: Option<String>) {
+        if self.is_current(url_path) {
+            self.page_anchor = anchor.map(|id| (self.index, id));
+        }
+    }
+
+    /// The page being read: from the PDF viewer, or from the book's page list.
+    /// `None` for an EPUB without a page list (see `estimated_page`).
+    pub fn page(&self) -> Option<PageNumber> {
+        if let Some(page) = self.pdf_page {
+            return Some(page);
+        }
+        let anchor = self
+            .page_anchor
+            .as_ref()
+            .filter(|(index, _)| *index == self.index)
+            .map(|(_, id)| id.as_str());
+        let number = self.contents.page_number(self.index, anchor)?;
+        Some(PageNumber {
+            number,
+            count: self.contents.pages.len(),
+        })
+    }
+
+    /// Page estimate for a book without a page list, from how far through
+    /// the book the reader is.
+    pub fn estimated_page(&self) -> PageNumber {
+        let bytes: u64 = self.contents.spine.iter().map(|item| item.size).sum();
+        let count = usize::try_from(bytes.div_ceil(BYTES_PER_PAGE))
+            .unwrap_or(usize::MAX)
+            .max(1);
+        let number = (self.progress() * count as f64).ceil() as usize;
+        PageNumber {
+            number: number.clamp(1, count),
+            count,
+        }
+    }
+
+    /// Page anchors of the current chapter, for the chapter to report.
+    pub fn page_ids(&self) -> Vec<String> {
+        self.contents.page_ids(self.index)
+    }
+
     /// Whether `url_path` (from the chapter iframe) is the current document.
     pub fn is_current(&self, url_path: &str) -> bool {
         protocol::parse_url_path(url_path).is_some_and(|(book_id, path)| {
@@ -263,6 +322,17 @@ impl Reader {
     pub fn progress(&self) -> f64 {
         self.contents.progress(self.index, self.fraction)
     }
+}
+
+/// A printed page of an EPUB is about this many bytes of XHTML; used only to
+/// estimate pages in books without a page list.
+const BYTES_PER_PAGE: u64 = 2000;
+
+/// A printed page `number` (1-based) out of `count` pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageNumber {
+    pub number: usize,
+    pub count: usize,
 }
 
 /// Where the chapter iframe should scroll to.
@@ -309,8 +379,24 @@ mod tests {
             metadata: Metadata::default(),
             spine: vec![item("a.xhtml"), item("b c.xhtml")],
             toc: Vec::new(),
+            pages: Vec::new(),
         };
         Reader::new(3, contents)
+    }
+
+    #[test]
+    fn page_is_taken_only_from_the_current_document() {
+        let mut r = reader();
+        r.on_page("/4/a.xhtml", 5, 340);
+        assert_eq!(r.page(), None);
+        r.on_page("/3/a.xhtml", 5, 340);
+        assert_eq!(
+            r.page(),
+            Some(PageNumber {
+                number: 5,
+                count: 340
+            })
+        );
     }
 
     #[test]

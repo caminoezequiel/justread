@@ -23,5 +23,5 @@ pub use href::Href;
 pub use opf::Metadata;
 pub use progress::{BookKey, Position, ProgressError, ProgressStore, write_atomic};
 pub use search::{SearchHit, SearchResults};
-pub use toc::{TocEntry, flatten};
+pub use toc::{PageTarget, TocEntry, flatten};
 pub use xml::is_well_formed as is_well_formed_xml;
