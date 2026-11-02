@@ -8,8 +8,9 @@ use epub_core::{Book, BookKey, EpubError, Href, SearchHit, TocEntry};
 
 use crate::bridge::{Bridge, PageEvent, Shortcut};
 use crate::lookup::{Lookup, LookupPopup};
+use crate::pdf;
 use crate::preferences::{LineWidth, MAX_FONT_SCALE, MIN_FONT_SCALE, Preferences, Theme};
-use crate::protocol::{OpenBook, SharedBook, SharedStyle};
+use crate::protocol::{OpenBook, SharedBook, SharedStyle, Source};
 use crate::reader::Reader;
 use crate::storage;
 
@@ -144,7 +145,11 @@ pub fn App() -> Element {
         let Some(results) = search_book
             .lock()
             .as_mut()
-            .map(|open| open.book.search(&query, SEARCH_LIMIT))
+            // PDFs have no text index yet: no hits.
+            .map(|open| match &mut open.source {
+                Source::Epub(book) => book.search(&query, SEARCH_LIMIT),
+                Source::Pdf(_) => Default::default(),
+            })
         else {
             return;
         };
@@ -349,6 +354,11 @@ pub fn App() -> Element {
                         r.on_scroll(&path, fraction, section);
                         None
                     }
+                    // A PDF's outline becomes its TOC (sent before `ready`).
+                    PageEvent::Outline { entries } => {
+                        r.contents.toc = pdf::toc(&entries);
+                        None
+                    }
                     PageEvent::Ready { path } => {
                         // Sections first: the scroll that may follow then
                         // already reports the right one.
@@ -378,8 +388,10 @@ pub fn App() -> Element {
         // doesn't block rendering while it is open.
         spawn(async move {
             let picked = rfd::AsyncFileDialog::new()
-                .set_title("Open EPUB")
-                .add_filter("EPUB books", &["epub"])
+                .set_title("Open book")
+                .add_filter("Books", &["epub", "pdf"])
+                .add_filter("EPUB", &["epub"])
+                .add_filter("PDF", &["pdf"])
                 .pick_file()
                 .await;
             if let Some(file) = picked {
@@ -397,7 +409,7 @@ pub fn App() -> Element {
         // `data-theme` switches the app's own colors (see style.css).
         div { class: "app", "data-theme": current_preferences.theme.name(),
             header { class: "toolbar",
-                button { class: "open", onclick: pick_file, "Open EPUB" }
+                button { class: "open", onclick: pick_file, "Open book" }
                 if let Some(r) = &snapshot {
                     BookHeader { reader: r.clone() }
                     div { class: "nav",
@@ -456,8 +468,8 @@ pub fn App() -> Element {
             match &snapshot {
                 None => rsx! {
                     main { class: "empty",
-                        p { "Open an EPUB to start reading." }
-                        button { class: "open", onclick: pick_file, "Open EPUB" }
+                        p { "Open an EPUB or PDF to start reading." }
+                        button { class: "open", onclick: pick_file, "Open book" }
                     }
                 },
                 Some(r) => {
@@ -703,14 +715,28 @@ fn TocList(
 /// Open the book at `path`, make it the one served over `epub://`, and
 /// return its reading state plus its identity for saving progress.
 fn open_book(shared: &SharedBook, path: &Path) -> Result<(Reader, BookKey), EpubError> {
+    let id = NEXT_BOOK_ID.fetch_add(1, Ordering::Relaxed);
+    if pdf::is_pdf(path) {
+        let bytes = std::fs::read(path)?;
+        let key = BookKey::from_file(path)?;
+        let contents = pdf::contents(path, bytes.len() as u64);
+        let reader = Reader::new(id, contents);
+        *shared.lock() = Some(OpenBook {
+            id,
+            source: Source::Pdf(bytes),
+        });
+        return Ok((reader, key));
+    }
     let book = Book::open(path)?;
     let key = BookKey::from_file(path)?;
     for warning in book.warnings() {
         eprintln!("justread: {}: {warning}", path.display());
     }
-    let id = NEXT_BOOK_ID.fetch_add(1, Ordering::Relaxed);
     let reader = Reader::new(id, book.contents().clone());
-    *shared.lock() = Some(OpenBook { id, book });
+    *shared.lock() = Some(OpenBook {
+        id,
+        source: Source::Epub(Box::new(book)),
+    });
     Ok((reader, key))
 }
 

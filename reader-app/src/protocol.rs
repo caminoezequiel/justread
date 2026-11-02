@@ -17,6 +17,8 @@ use dioxus::desktop::wry::http::{Request, Response, StatusCode, header};
 use epub_core::{Book, EpubError};
 use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 
+use crate::pdf::{FILE_PATH, VIEWER_PATH};
+
 pub const SCHEME: &str = "epub";
 
 /// WebView2 (Windows) exposes custom schemes as `http://<scheme>.<host>`.
@@ -28,6 +30,11 @@ const ORIGIN: &str = "http://epub.book";
 /// Files of our own, served next to the book (see `reader.js`).
 const INTERNAL_PREFIX: &str = "__justread/";
 const READER_JS: &str = include_str!("reader.js");
+// PDF.js and the viewer page built on it (see pdf.rs).
+const PDF_VIEWER_HTML: &str = include_str!("../pdf-viewer/viewer.html");
+const PDF_VIEWER_JS: &str = include_str!("../pdf-viewer/viewer.js");
+const PDF_JS: &[u8] = include_bytes!("../pdf-viewer/pdf.min.mjs");
+const PDF_WORKER_JS: &[u8] = include_bytes!("../pdf-viewer/pdf.worker.min.mjs");
 /// Self-closing `<link/>` so the tag is valid in XHTML as well as HTML.
 const INJECTED_TAG: &str = r#"<link rel="stylesheet" href="/__justread/reader.css"/><script src="/__justread/reader.js"></script>"#;
 
@@ -44,9 +51,17 @@ const SEGMENT: &AsciiSet = &CONTROLS
     .add(b'{')
     .add(b'}');
 
+/// What is open: an EPUB read from its zip, or a PDF held in memory (read
+/// once when it opens; PDF.js asks for it as one file).
+pub enum Source {
+    /// Boxed: an EPUB handle is much larger than the PDF bytes.
+    Epub(Box<Book<BufReader<File>>>),
+    Pdf(Vec<u8>),
+}
+
 pub struct OpenBook {
     pub id: u64,
-    pub book: Book<BufReader<File>>,
+    pub source: Source,
 }
 
 /// The open book, shared by the UI (which opens books) and the protocol
@@ -124,6 +139,15 @@ pub fn handle(
                 READER_JS.as_bytes().to_vec(),
             ),
             "reader.css" => respond(StatusCode::OK, "text/css", style.get().into_bytes()),
+            "pdf-viewer.js" => respond(
+                StatusCode::OK,
+                "text/javascript",
+                PDF_VIEWER_JS.as_bytes().to_vec(),
+            ),
+            "pdf.min.mjs" => respond(StatusCode::OK, "text/javascript", PDF_JS.to_vec()),
+            "pdf.worker.min.mjs" => {
+                respond(StatusCode::OK, "text/javascript", PDF_WORKER_JS.to_vec())
+            }
             _ => return not_found(url_path),
         };
         // The stylesheet changes with the preferences; never let the webview
@@ -143,7 +167,11 @@ pub fn handle(
     let Some(open) = guard.as_mut().filter(|open| open.id == id) else {
         return not_found(url_path);
     };
-    let bytes = match open.book.read_bytes(&path) {
+    let book = match &mut open.source {
+        Source::Epub(book) => book,
+        Source::Pdf(bytes) => return pdf_response(bytes, &path),
+    };
+    let bytes = match book.read_bytes(&path) {
         Ok(bytes) => bytes,
         Err(EpubError::MissingFile(_)) => return not_found(&path),
         Err(e) => {
@@ -155,8 +183,7 @@ pub fn handle(
         }
     };
 
-    let media_type = open
-        .book
+    let media_type = book
         .media_type(&path)
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| guess_media_type(&path));
@@ -165,6 +192,19 @@ pub fn handle(
         return respond(StatusCode::OK, media_type, bytes);
     }
     respond(StatusCode::OK, media_type, bytes)
+}
+
+/// The viewer page and the PDF file of a PDF book (see pdf.rs).
+fn pdf_response(bytes: &[u8], path: &str) -> Response<Cow<'static, [u8]>> {
+    match path {
+        VIEWER_PATH => {
+            let (media_type, body) =
+                prepare_document("text/html", PDF_VIEWER_HTML.as_bytes().to_vec());
+            respond(StatusCode::OK, media_type, body)
+        }
+        FILE_PATH => respond(StatusCode::OK, "application/pdf", bytes.to_vec()),
+        _ => not_found(path),
+    }
 }
 
 fn is_document(media_type: &str) -> bool {

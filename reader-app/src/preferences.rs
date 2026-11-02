@@ -185,6 +185,13 @@ impl Preferences {
                  margin-left: auto !important; margin-right: auto !important; }}\n"
             );
         }
+        // PDF pages are canvases, so the theme acts on them directly (see
+        // pdf-viewer/viewer.html, whose body has the `jr-pdf` class).
+        match self.theme {
+            Theme::Light => {}
+            Theme::Sepia => css += ".jr-pdf canvas { filter: sepia(0.35); }\n",
+            Theme::Dark => css += ".jr-pdf canvas { filter: invert(0.9) hue-rotate(180deg); }\n",
+        }
         if let Some(p) = self.theme.palette() {
             css += &format!(
                 "html{BOOST}, html{BOOST} body {{ background: {bg} !important; color: {text} !important; }}\n\

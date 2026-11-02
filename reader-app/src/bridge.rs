@@ -9,6 +9,7 @@
 use dioxus::document::{Eval, EvalError, eval};
 use serde::{Deserialize, Serialize};
 
+use crate::pdf::OutlineItem;
 use crate::reader::Scroll;
 
 const BRIDGE_JS: &str = r#"
@@ -102,6 +103,10 @@ pub enum PageEvent {
     },
     Ready {
         path: String,
+    },
+    /// The outline of a PDF (its TOC), sent before `ready`.
+    Outline {
+        entries: Vec<OutlineItem>,
     },
     /// The chapter couldn't locate a search hit it was asked to show.
     FindFailed,

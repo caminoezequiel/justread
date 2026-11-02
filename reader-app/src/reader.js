@@ -121,7 +121,7 @@
   // the translation and asks for the text to be marked (`mark_lookup`).
   const WORD_CHAR = /[\p{L}\p{M}\p{N}'’-]/u;
   const EDGE = /['’-]/;
-  const BLOCK = "p, li, blockquote, dd, dt, td, th, h1, h2, h3, h4, h5, h6, figcaption, pre";
+  const BLOCK = "p, li, blockquote, dd, dt, td, th, h1, h2, h3, h4, h5, h6, figcaption, pre, .textLayer";
   let lookupRange = null;
   const squash = (text) => text.replace(/\s+/g, " ");
 
@@ -416,5 +416,8 @@
     }
   });
 
-  addEventListener("load", () => send({ kind: "ready", path: location.pathname }));
+  // The PDF viewer sends its own `ready` once its pages exist (window.justreadDeferReady).
+  addEventListener("load", () => {
+    if (!window.justreadDeferReady) send({ kind: "ready", path: location.pathname });
+  });
 })();

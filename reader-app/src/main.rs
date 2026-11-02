@@ -12,6 +12,7 @@ mod dictionary;
 mod google;
 mod history;
 mod lookup;
+mod pdf;
 mod preferences;
 mod protocol;
 mod reader;
