@@ -10,8 +10,8 @@ name = "justread"
 identifier = "io.github.justread"
 publisher = "Ezequiel Camino"
 category = "Utility"
-short_description = "A lightweight EPUB reader"
-long_description = "justread reads EPUB books straight from the file, remembers your place in every book, and offers light, sepia and dark themes with adjustable text size and line width."
+short_description = "A lightweight EPUB and PDF reader"
+long_description = "justread reads EPUB and PDF books straight from the file, remembers your place in every book, and offers light, sepia and dark themes with adjustable text size and line width."
 copyright = "© 2026 Ezequiel Camino"
 # PNGs are used on Linux and turned into an .icns on macOS; the .ico is the
 # Windows executable icon. Regenerate with `python3 icons/make_icons.py`.
@@ -27,7 +27,7 @@ icon = [
 [bundle.deb]
 # Runtime libraries of a Dioxus desktop app on Debian/Ubuntu.
 depends = ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libxdo3"]
-# Our own .desktop entry (lowercase name, "Open with" for .epub files).
+# Our own .desktop entry (lowercase name, "Open with" for .epub and .pdf files).
 # dx reads this path relative to the directory it runs in, so always run
 # `dx bundle` from the workspace root.
 desktop_template = "reader-app/packaging/justread.desktop"

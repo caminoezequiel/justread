@@ -2,7 +2,7 @@
 name = "reader-app"
 version = "0.1.1"
 edition = "2024"
-description = "A lightweight EPUB reader"
+description = "A lightweight EPUB and PDF reader"
 # Also the "Maintainer" of the Linux packages built by `dx bundle`.
 authors = ["Ezequiel Camino"]
 

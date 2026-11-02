@@ -184,6 +184,9 @@ enum Command {
     MarkLookup,
     #[serde(rename = "clear_lookup")]
     ClearLookup,
+    /// Zoom a PDF to `scale` times its fit-to-width size (EPUBs ignore it).
+    #[serde(rename = "zoom")]
+    Zoom { scale: f64 },
 }
 
 /// Handle to the bridge script. Cloning it gives another handle to the same
@@ -221,6 +224,10 @@ impl Bridge {
 
     pub fn mark_lookup(&self) {
         self.send(Command::MarkLookup);
+    }
+
+    pub fn zoom(&self, scale: f64) {
+        self.send(Command::Zoom { scale });
     }
 
     pub fn clear_lookup(&self) {

@@ -2,17 +2,24 @@
 // document, so the chapter script (reader.js) handles scrolling, page turns,
 // internal links, Back/Forward and tap-to-translate just as it does for EPUB
 // chapters. Pages are placed (sized) up front and rendered as they come near
-// the screen.
+// the screen. The app's text size is the zoom (`zoom` command).
 import * as pdfjsLib from "/__justread/pdf.min.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/__justread/pdf.worker.min.mjs";
 
 // The page's id on the chapter: a TOC entry with `#page-N` scrolls to it.
 const pageId = (number) => `page-${number}`;
-const MAX_WIDTH = 900; // CSS pixels: wide enough to read, narrow enough to hold a page
+const MAX_WIDTH = 900; // CSS pixels at 100%: wide enough to read, narrow enough to hold a page
 const GUTTER = 16;
 
 const send = (msg) => parent.postMessage({ justread: msg }, "*");
+
+// Filled in by `main`: one item per page, see `layout`.
+let doc = null;
+let observer = null;
+let fitWidth = 0; // CSS pixels of a page at 100% zoom
+let zoom = 1;
+const pages = [];
 
 // Page index (0-based) a destination points at, or null.
 const pageOf = async (doc, dest) => {
@@ -66,18 +73,23 @@ const addLinks = async (doc, page, viewport, layer) => {
   }
 };
 
-// Draw one page (canvas, text layer, links) into its placeholder.
-const renderPage = async (doc, page, box, scale) => {
-  const viewport = page.getViewport({ scale });
+// Draw one page (canvas, text layer, links) into its box. Each layer is
+// added only if the page wasn't zoomed (and so re-laid out) meanwhile.
+const renderPage = async (item) => {
+  const { page, box } = item;
+  const version = item.version;
+  const current = () => item.version === version;
+  const viewport = page.getViewport({ scale: item.scale });
   const dpr = window.devicePixelRatio || 1;
   const canvas = document.createElement("canvas");
   canvas.width = Math.floor(viewport.width * dpr);
   canvas.height = Math.floor(viewport.height * dpr);
   canvas.style.width = `${viewport.width}px`;
   canvas.style.height = `${viewport.height}px`;
-  box.append(canvas);
   const transform = dpr === 1 ? null : [dpr, 0, 0, dpr, 0, 0];
   await page.render({ canvasContext: canvas.getContext("2d"), viewport, transform }).promise;
+  if (!current()) return;
+  box.append(canvas);
 
   const text = document.createElement("div");
   text.className = "textLayer";
@@ -99,37 +111,71 @@ const renderPage = async (doc, page, box, scale) => {
   await addLinks(doc, page, viewport, links);
 };
 
+// Size every page for the current zoom; the pages are then rendered again
+// as they come near the screen.
+const layout = () => {
+  for (const item of pages) {
+    item.scale = (fitWidth * zoom) / item.base.width;
+    item.box.style.width = `${item.base.width * item.scale}px`;
+    item.box.style.height = `${item.base.height * item.scale}px`;
+  }
+};
+
+// Zoom to `scale` (1 = fit to width), keeping the reading position: the same
+// fraction of the document stays at the top of the window.
+const setZoom = (scale) => {
+  if (!pages.length) {
+    zoom = scale;
+    return;
+  }
+  const max = document.documentElement.scrollHeight - innerHeight;
+  const fraction = max > 0 ? scrollY / max : 0;
+  zoom = scale;
+  layout();
+  for (const item of pages) {
+    item.version++; // drops any render still running at the old size
+    item.rendered = false;
+    item.box.replaceChildren();
+    // Observing again makes the observer report the page's current position.
+    observer.unobserve(item.box);
+    observer.observe(item.box);
+  }
+  const newMax = document.documentElement.scrollHeight - innerHeight;
+  scrollTo(0, fraction * newMax);
+};
+
+addEventListener("message", (e) => {
+  const cmd = e.source === parent && e.data && e.data.justread;
+  if (cmd && cmd.kind === "zoom") setZoom(cmd.scale);
+});
+
 const main = async () => {
   const root = document.getElementById("pages");
-  const doc = await pdfjsLib.getDocument({ url: "document.pdf" }).promise;
+  doc = await pdfjsLib.getDocument({ url: "document.pdf" }).promise;
 
   // The outline first: the app reads the sections when the page is ready.
   send({ kind: "outline", entries: await outline(doc, await doc.getOutline()) });
 
-  const width = Math.min(MAX_WIDTH, root.clientWidth - 2 * GUTTER);
-  const pages = [];
+  fitWidth = Math.min(MAX_WIDTH, root.clientWidth - 2 * GUTTER);
   for (let number = 1; number <= doc.numPages; number++) {
     const page = await doc.getPage(number);
-    const base = page.getViewport({ scale: 1 });
-    const scale = width / base.width;
     const box = document.createElement("div");
     box.className = "page";
     box.id = pageId(number);
-    box.style.width = `${width}px`;
-    box.style.height = `${base.height * scale}px`;
     root.append(box);
-    pages.push({ page, box, scale, rendered: false });
+    pages.push({ page, box, base: page.getViewport({ scale: 1 }), scale: 1, rendered: false, version: 0 });
   }
+  layout();
 
   // Render pages as they approach the screen, not all up front.
-  const observer = new IntersectionObserver(
+  observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const item = pages.find((p) => p.box === entry.target);
         if (!item || item.rendered) continue;
         item.rendered = true;
-        renderPage(doc, item.page, item.box, item.scale).catch((e) => console.error(e));
+        renderPage(item).catch((e) => console.error(e));
       }
     },
     { rootMargin: "150% 0px" },

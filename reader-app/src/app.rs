@@ -63,6 +63,8 @@ pub fn App() -> Element {
     let mut store = use_signal(move || storage::load_progress(progress_file));
     let mut preferences = use_signal(|| startup.preferences);
     let mut settings_open = use_signal(|| false);
+    // The chapter list on the left; hidden to give the text the full width.
+    let mut sidebar_open = use_signal(|| true);
     let mut restyles = use_signal(|| 0_u64);
     let mut search_query = use_signal(String::new);
     let mut search = use_signal(|| None::<SearchState>);
@@ -96,6 +98,7 @@ pub fn App() -> Element {
         style.set(new.chapter_css());
         restyles += 1;
         restyle_bridge.restyle(restyles());
+        restyle_bridge.zoom(zoom_of(new.font_scale));
         if let Some(file) = &preferences_file {
             storage::save_preferences(file, &new);
         }
@@ -363,6 +366,9 @@ pub fn App() -> Element {
                         // Sections first: the scroll that may follow then
                         // already reports the right one.
                         if r.is_current(&path) {
+                            // Zoom first: a PDF's pages must have their final
+                            // size before the saved position is applied.
+                            scroll_bridge.zoom(zoom_of(preferences.peek().font_scale));
                             scroll_bridge.track_sections(r.section_ids());
                         }
                         r.on_ready(&path)
@@ -411,6 +417,13 @@ pub fn App() -> Element {
             header { class: "toolbar",
                 button { class: "open", onclick: pick_file, "Open book" }
                 if let Some(r) = &snapshot {
+                    button {
+                        class: "sidebar-toggle",
+                        title: if sidebar_open() { "Hide chapters" } else { "Show chapters" },
+                        "aria-expanded": sidebar_open(),
+                        onclick: move |_| sidebar_open.toggle(),
+                        "☰"
+                    }
                     BookHeader { reader: r.clone() }
                     div { class: "nav",
                         button {
@@ -488,7 +501,9 @@ pub fn App() -> Element {
                     };
                     rsx! {
                         div { class: "body",
-                            nav { class: "sidebar", aria_label: "Table of contents and search",
+                            nav {
+                                class: if sidebar_open() { "sidebar" } else { "sidebar collapsed" },
+                                aria_label: "Table of contents and search",
                                 div { class: "search",
                                     input {
                                         id: "search",
@@ -710,6 +725,11 @@ fn TocList(
             }
         }
     }
+}
+
+/// Text size (percent) as a PDF zoom factor: 100% is the fit-to-width page.
+fn zoom_of(font_scale: u16) -> f64 {
+    f64::from(font_scale) / 100.0
 }
 
 /// Open the book at `path`, make it the one served over `epub://`, and

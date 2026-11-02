@@ -1,7 +1,7 @@
 # justread
 
-A lightweight, cross-platform desktop EPUB reader for Linux, macOS and Windows,
-written in Rust. It aims to be a fast, simple alternative to Calibre's viewer:
+A lightweight, cross-platform desktop EPUB and PDF reader for Linux, macOS and
+Windows, written in Rust. It aims to be a fast, simple alternative to Calibre's viewer:
 open a book, read it comfortably, and pick up exactly where you left off.
 
 ## Objective
@@ -22,11 +22,18 @@ justread has two goals:
 
 - Opens EPUB 2 and EPUB 3 books, rendered with the book's own styles, images
   and fonts.
+- Opens PDF files too, shown as a scrolling document with the PDF's own
+  bookmarks as the table of contents, its internal links, tap to translate,
+  and the text size setting as zoom (PDF pages can't reflow, so line width
+  doesn't apply to them).
+- A **☰** button in the toolbar hides and shows the chapter sidebar, to give
+  the text the full width.
 - Table of contents sidebar (EPUB3 `nav.xhtml`, or EPUB2 `toc.ncx`), including
   jumps to sections inside a chapter; it follows along, highlighting the
   section you are reading. Links inside the book work too.
-- Search the whole book; results show the chapter and surrounding text, and
-  clicking one jumps to that exact spot and highlights it.
+- Search the whole book (EPUB only for now); results show the chapter and
+  surrounding text, and clicking one jumps to that exact spot and highlights
+  it.
 - Page turning with the arrow keys, continuing across chapters.
 - Current chapter title and overall progress (weighted by chapter length).
 - Remembers your exact place in every book, and reopens the last book on launch.
@@ -42,11 +49,12 @@ justread has two goals:
 
 ## Using justread
 
-Start it with a book, or without one to reopen the last book you read (or use
-**Open EPUB**):
+Start it with a book (EPUB or PDF), or without one to reopen the last book you
+read (or use **Open book**):
 
 ```bash
 justread path/to/book.epub
+justread path/to/document.pdf
 ```
 
 | Action | How |
@@ -55,7 +63,8 @@ justread path/to/book.epub
 | Scroll | <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>Page Up</kbd> / <kbd>Page Down</kbd>, <kbd>Space</kbd>, mouse wheel |
 | Next / previous chapter | **Next ›** / **‹ Prev** buttons |
 | Go to a chapter or section | Click it in the sidebar |
-| Reading settings | **Aa** button: theme (light keeps the book's own colors), text size 60–200%, line width |
+| Show or hide the sidebar | **☰** button in the toolbar |
+| Reading settings | **Aa** button: theme (light keeps the book's own colors), text size 60–200% (zoom for PDFs), line width (EPUB only) |
 | Text size | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>+</kbd> / <kbd>−</kbd>, <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>0</kbd> to reset |
 | Search | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd>, type, <kbd>Enter</kbd>; click a result to jump to it |
 | Translate a word | Click it; select text to translate a phrase. **Translate sentence ↗** opens Google Translate. Turn it off in **Aa** → Translate |
@@ -95,7 +104,8 @@ The dictionary comes from the English Wiktionary, under CC BY-SA 4.0 (see
 ## How it works
 
 An EPUB is a zip file of XHTML, CSS, images and fonts, plus a few XML files
-that describe them. justread never extracts the book to disk; it reads each
+that describe them. (A PDF is shown by PDF.js in the same way: its pages are
+drawn into one scrolling view, and its bookmarks become the table of contents.) justread never extracts the book to disk; it reads each
 entry from the zip when it needs it:
 
 1. `META-INF/container.xml` points to the **OPF** package file.
@@ -150,7 +160,7 @@ build requirements:
 Run the reader:
 
 ```bash
-cargo run -p reader-app -- path/to/book.epub
+cargo run -p reader-app -- path/to/book.epub   # or a .pdf file
 ```
 
 With hot reload during development (install the Dioxus CLI once with
@@ -186,7 +196,7 @@ dx bundle -p reader-app --desktop --release --package-types deb --package-types 
 ```
 
 The packages install `justread` with a menu entry, icons, and "Open with" for
-`.epub` files. Install with `sudo apt install ./dist/justread_0.1.0_amd64.deb`
+`.epub` and `.pdf` files. Install with `sudo apt install ./dist/justread_0.1.0_amd64.deb`
 (or `sudo dnf install ./dist/justread-0.1.0-1.x86_64.rpm`).
 
 **macOS** (`.app` and `.dmg`):

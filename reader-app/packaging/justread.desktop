@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=justread
-GenericName=EPUB Reader
+GenericName=EPUB and PDF Reader
 {{#if comment}}
 Comment={{comment}}
 {{/if}}
 Categories={{categories}}
 Icon={{icon}}
 Exec={{exec}} %f
-MimeType=application/epub+zip;
+MimeType=application/epub+zip;application/pdf;
 Terminal=false

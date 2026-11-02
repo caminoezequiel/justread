@@ -1,6 +1,6 @@
-//! justread: a lightweight EPUB reader.
+//! justread: a lightweight EPUB and PDF reader.
 //!
-//! Usage: `justread [book.epub]`. Without a book, the last one read is reopened.
+//! Usage: `justread [book.epub | document.pdf]`. Without a book, the last one read is reopened.
 
 // On Windows, release builds are GUI programs: no console window opens next
 // to the app. (`cfg_attr` applies an attribute only when the condition holds.)
