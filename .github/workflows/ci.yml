@@ -10,14 +10,16 @@ on:
   # A tag pushed by a workflow doesn't trigger `push`, hence this entry.
   workflow_call:
     inputs:
-      ref:
-        description: Git ref to check out (empty = the commit that triggered the run)
-        type: string
-        default: ""
+      # Only a tag, never an arbitrary branch or SHA: the jobs check it out and
+      # build it, and a release must come from a commit release.yml tagged.
       release_tag:
-        description: Publish a GitHub Release for this tag after bundling (empty = no release)
+        description: Build this tag and publish a GitHub Release for it (empty = the commit that triggered the run, no release)
         type: string
         default: ""
+
+# Read-only token by default; only the release job asks for more.
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.release_tag }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -73,16 +75,22 @@ jobs:
           - os: windows-latest
             packages: --package-types msi --package-types nsis
     runs-on: ${{ matrix.os }}
+    env:
+      # Installers that become a GitHub Release (same test as the release job).
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.release_tag }}
 
       - uses: dtolnay/rust-toolchain@stable
 
       # Also caches ~/.cargo/bin, so the dx install below is quick after the
-      # first run.
+      # first run. Not for releases: anything that ever ran on main (a
+      # dependency's build script, an action) could have written that cache,
+      # and published installers must not be built from it (cache poisoning).
       - uses: Swatinem/rust-cache@v2
+        if: env.RELEASE != 'true'
         with:
           key: bundle
 
@@ -125,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.release_tag }}
 
       # Installer names contain the crate version, so a tag that doesn't
       # match it would publish mislabelled files.

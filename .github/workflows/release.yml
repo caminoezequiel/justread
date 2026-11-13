@@ -84,5 +84,4 @@ jobs:
     needs: prepare
     uses: ./.github/workflows/ci.yml
     with:
-      ref: ${{ needs.prepare.outputs.tag }}
       release_tag: ${{ needs.prepare.outputs.tag }}
