@@ -311,7 +311,14 @@ pub fn App() -> Element {
                         }
                         Shortcut::Back => go_history(true),
                         Shortcut::Forward => go_history(false),
-                        Shortcut::PaceToggle => set_pacing(!*pacing.peek()),
+                        Shortcut::PaceToggle => {
+                            // Copy the value first: a `peek()` guard used as a
+                            // call argument lives until the end of the whole
+                            // statement, so it would still be borrowed while
+                            // `set_pacing` writes the signal (AlreadyBorrowed).
+                            let playing = *pacing.peek();
+                            set_pacing(!playing);
+                        }
                         Shortcut::PaceSlower => set_preferences(current.slower()),
                         Shortcut::PaceFaster => set_preferences(current.faster()),
                         // The popup first: Esc closes one thing at a time.

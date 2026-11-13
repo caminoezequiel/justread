@@ -9,6 +9,27 @@
 // selections for translation, and runs the reading pacer.
 (() => {
   const send = (msg) => parent.postMessage({ justread: msg }, "*");
+
+  // Highlights (CSS Custom Highlight API): one `Highlight` per name,
+  // registered once and then changed in place. WebKit repaints ranges added
+  // to or removed from a Highlight, but replacing or deleting the Highlight in
+  // `CSS.highlights` repaints only the new one: the old mark stays painted
+  // wherever the new range doesn't cover it (e.g. in the previous paragraph).
+  // `mark(name)` with no ranges clears it. False when unsupported.
+  const highlights = {};
+  const PRIORITY = { "jr-pace-word": 1 }; // the word is drawn over its line band
+  const mark = (name, ...ranges) => {
+    if (!window.CSS || !CSS.highlights || !window.Highlight) return false;
+    let h = highlights[name];
+    if (!h) {
+      h = highlights[name] = new Highlight();
+      h.priority = PRIORITY[name] || 0;
+      CSS.highlights.set(name, h);
+    }
+    h.clear();
+    for (const r of ranges) h.add(r);
+    return true;
+  };
   const root = document.documentElement;
   const maxScroll = () => root.scrollHeight - innerHeight;
   const fraction = () => {
@@ -280,12 +301,10 @@
   });
 
   const markLookup = () => {
-    if (lookupRange && window.CSS && CSS.highlights && window.Highlight) {
-      CSS.highlights.set("jr-lookup", new Highlight(lookupRange));
-    }
+    if (lookupRange) mark("jr-lookup", lookupRange);
   };
   const clearLookup = () => {
-    if (window.CSS && CSS.highlights) CSS.highlights.delete("jr-lookup");
+    mark("jr-lookup");
     lookupRange = null;
   };
 
@@ -369,8 +388,7 @@
     return null;
   };
   const clearFind = () => {
-    if (window.CSS && CSS.highlights) CSS.highlights.delete("jr-search");
-    else getSelection().removeAllRanges();
+    if (!mark("jr-search")) getSelection().removeAllRanges();
   };
   const showFind = (query, occurrence) => {
     clearFind();
@@ -379,9 +397,7 @@
       send({ kind: "find_failed" });
       return;
     }
-    if (window.CSS && CSS.highlights && window.Highlight) {
-      CSS.highlights.set("jr-search", new Highlight(range));
-    } else {
+    if (!mark("jr-search", range)) {
       const selection = getSelection();
       selection.removeAllRanges();
       selection.addRange(range);
@@ -501,19 +517,16 @@
     };
 
     const clearMarks = () => {
-      if (!window.CSS || !CSS.highlights) return;
-      CSS.highlights.delete("jr-pace-line");
-      CSS.highlights.delete("jr-pace-word");
+      mark("jr-pace-line");
+      mark("jr-pace-word");
     };
     const show = () => {
       if (!line || index < line.first || index > line.last) line = lineAround(index);
       const band = document.createRange();
       band.setStart(words[line.first].range.startContainer, words[line.first].range.startOffset);
       band.setEnd(words[line.last].range.endContainer, words[line.last].range.endOffset);
-      const word = new Highlight(words[index].range);
-      word.priority = 1; // drawn over the line band
-      CSS.highlights.set("jr-pace-line", new Highlight(band));
-      CSS.highlights.set("jr-pace-word", word);
+      mark("jr-pace-line", band);
+      mark("jr-pace-word", words[index].range);
       const r = band.getBoundingClientRect();
       if (r.top < 0 || r.bottom > innerHeight * PACE.scrollBelow) {
         ownScrollUntil = performance.now() + 1000; // a smooth scroll lasts a while

@@ -8,7 +8,7 @@ const FONT_SCALE_STEP: u16 = 10;
 /// Reading pacer speed, in words per minute.
 pub const MIN_PACE_WPM: u16 = 80;
 pub const MAX_PACE_WPM: u16 = 600;
-const PACE_WPM_STEP: u16 = 20;
+const PACE_WPM_STEP: u16 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -308,11 +308,11 @@ mod tests {
     #[test]
     fn pace_stays_in_range() {
         let mut prefs = Preferences::default();
-        for _ in 0..50 {
+        for _ in 0..200 {
             prefs = prefs.faster();
         }
         assert_eq!(prefs.pace_wpm, MAX_PACE_WPM);
-        for _ in 0..50 {
+        for _ in 0..200 {
             prefs = prefs.slower();
         }
         assert_eq!(prefs.pace_wpm, MIN_PACE_WPM);
