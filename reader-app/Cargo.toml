@@ -1,6 +1,6 @@
 [package]
 name = "reader-app"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "A lightweight EPUB and PDF reader"
 # Also the "Maintainer" of the Linux packages built by `dx bundle`.
