@@ -55,6 +55,9 @@ html, body, #main { margin: 0; height: 100%; }
 .toolbar .chapter { color: var(--muted); font-size: 13px; }
 .nav { display: flex; gap: 6px; align-items: center; }
 .nav .divider { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--border); }
+.pacer { display: flex; gap: 4px; align-items: center; }
+.pacer button { padding: 5px 8px; min-width: 2em; }
+.pacer .wpm { min-width: 5.5em; text-align: center; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .progress { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .progress .bar { width: 120px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }

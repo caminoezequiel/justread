@@ -6,7 +6,7 @@
 // in-book link clicks, scrolling and when the page is ready, scrolls to a
 // fragment, the end, or a saved position when the app asks, swaps in a
 // new reader stylesheet when preferences change, and sends clicked words and
-// selections for translation.
+// selections for translation, and runs the reading pacer.
 (() => {
   const send = (msg) => parent.postMessage({ justread: msg }, "*");
   const root = document.documentElement;
@@ -33,6 +33,13 @@
   // Same shortcuts as the app window (bridge.rs), handled by the app.
   const shortcut = (e) => {
     if (e.key === "Escape") return "escape";
+    // The reading pacer (EPUB chapters only: the PDF viewer defers `ready`).
+    const typing = e.target.closest && e.target.closest("input, textarea, select, button");
+    if (!window.justreadDeferReady && !typing && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      if (e.key === " " && !e.shiftKey) return "pace_toggle";
+      if (e.key === "[") return "pace_slower";
+      if (e.key === "]") return "pace_faster";
+    }
     if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
       if (e.key === "ArrowLeft") return "back";
       if (e.key === "ArrowRight") return "forward";
@@ -52,6 +59,8 @@
       send({ kind: "shortcut", action });
       return;
     }
+    // Keys that scroll the page take over from the pacer.
+    if (SCROLL_KEYS.has(e.key)) pacer.userScrolled();
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
@@ -253,6 +262,7 @@
     // A click that ends a selection: handled by the mouseup below.
     if (!getSelection().isCollapsed || e.button !== 0) return;
     const range = wordAt(e.clientX, e.clientY);
+    if (range) pacer.clicked(range);
     if (range) sendLookup(range);
     else send({ kind: "dismiss" });
   };
@@ -262,7 +272,9 @@
     setTimeout(() => {
       const selection = getSelection();
       if (!selection.isCollapsed && selection.rangeCount) {
-        sendLookup(toWholeWords(selection.getRangeAt(0).cloneRange()));
+        const range = toWholeWords(selection.getRangeAt(0).cloneRange());
+        pacer.clicked(range);
+        sendLookup(range);
       }
     }, 0);
   });
@@ -377,6 +389,213 @@
     scrollBy(0, range.getBoundingClientRect().top - innerHeight / 3);
   };
 
+  // --- Reading pacer ----------------------------------------------------
+  // Like a pencil run under the line: a soft band on the current line and a
+  // stronger mark on the current word, advancing at `wpm` words per minute,
+  // a little slower on long words and at punctuation. The page scrolls to
+  // keep the line in the upper part of the screen; at the end of the chapter
+  // it asks the app for the next one (which restarts the pacer at its top).
+  // Scrolling by hand or clicking stops it (`pace_paused`).
+  const PACE = {
+    longWord: 8, // letters
+    longWordPause: 1.3,
+    commaPause: 1.6, // after , ; : – —
+    sentencePause: 2.2, // after . ! ?
+    blockPause: 2.5, // last word of a paragraph, heading, list item…
+    scrollBelow: 0.7, // scroll once the line passes 70% of the window…
+    scrollTo: 0.3, // …so that it sits at 30%
+  };
+  const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"]);
+
+  const pacer = (() => {
+    let words = null; // [{ range, pause }] in document order, built once
+    let index = 0;
+    let wpm = 200;
+    let timer = null;
+    let line = null; // { first, last, top } of the current line, in words
+    let startAt = null; // a clicked word: the next start begins there
+    let ownScrollUntil = 0; // scrolls before this time are ours, not the reader's
+    const supported = () => window.CSS && CSS.highlights && window.Highlight && window.Intl && Intl.Segmenter;
+
+    // Words of the body, skipping script/style and hidden text, with how much
+    // longer than one beat to stay on each.
+    const build = () => {
+      const list = [];
+      if (!document.body) return list;
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) => {
+          const el = n.parentElement;
+          if (!el || el.closest("script, style") || !el.getClientRects().length) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      const segmenter = new Intl.Segmenter(document.documentElement.lang || "en", { granularity: "word" });
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.data;
+        const block = node.parentElement.closest(BLOCK) || node.parentElement;
+        const inNode = [];
+        for (const s of segmenter.segment(text)) {
+          if (s.isWordLike) inNode.push(s);
+        }
+        inNode.forEach((s, i) => {
+          const end = s.index + s.segment.length;
+          // The text between this word and the next one in the node.
+          const gap = text.slice(end, i + 1 < inNode.length ? inNode[i + 1].index : text.length);
+          let pause = s.segment.length > PACE.longWord ? PACE.longWordPause : 1;
+          if (/[.!?…]/.test(gap)) pause = Math.max(pause, PACE.sentencePause);
+          else if (/[,;:–—]/.test(gap)) pause = Math.max(pause, PACE.commaPause);
+          const range = document.createRange();
+          range.setStart(node, s.index);
+          range.setEnd(node, end);
+          list.push({ range, pause, block });
+        });
+      }
+      list.forEach((w, i) => {
+        const next = list[i + 1];
+        if (!next || next.block !== w.block) w.pause = Math.max(w.pause, PACE.blockPause);
+      });
+      return list;
+    };
+
+    const rectOf = (i) => words[i].range.getClientRects()[0] || words[i].range.getBoundingClientRect();
+    // Two words are on the same line when their boxes overlap vertically by
+    // more than half the smaller one (words of different sizes still count).
+    const sameLine = (a, b) => {
+      const overlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      return overlap > Math.min(a.height, b.height) / 2;
+    };
+    const lineAround = (i) => {
+      const r = rectOf(i);
+      let first = i;
+      let last = i;
+      while (first > 0 && sameLine(rectOf(first - 1), r)) first--;
+      while (last + 1 < words.length && sameLine(rectOf(last + 1), r)) last++;
+      return { first, last };
+    };
+
+    // First word at least partly below the top of the window (binary search:
+    // words come in document order, which is nearly always top to bottom).
+    const firstVisible = () => {
+      let lo = 0;
+      let hi = words.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (rectOf(mid).bottom > 0) hi = mid;
+        else lo = mid + 1;
+      }
+      return lo;
+    };
+    // The word that contains (or follows) the start of `range`.
+    const indexOf = (range) => {
+      let lo = 0;
+      let hi = words.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        // START_TO_END: this word's end compared with the start of `range`.
+        if (words[mid].range.compareBoundaryPoints(Range.START_TO_END, range) > 0) hi = mid;
+        else lo = mid + 1;
+      }
+      return lo;
+    };
+
+    const clearMarks = () => {
+      if (!window.CSS || !CSS.highlights) return;
+      CSS.highlights.delete("jr-pace-line");
+      CSS.highlights.delete("jr-pace-word");
+    };
+    const show = () => {
+      if (!line || index < line.first || index > line.last) line = lineAround(index);
+      const band = document.createRange();
+      band.setStart(words[line.first].range.startContainer, words[line.first].range.startOffset);
+      band.setEnd(words[line.last].range.endContainer, words[line.last].range.endOffset);
+      const word = new Highlight(words[index].range);
+      word.priority = 1; // drawn over the line band
+      CSS.highlights.set("jr-pace-line", new Highlight(band));
+      CSS.highlights.set("jr-pace-word", word);
+      const r = band.getBoundingClientRect();
+      if (r.top < 0 || r.bottom > innerHeight * PACE.scrollBelow) {
+        ownScrollUntil = performance.now() + 1000; // a smooth scroll lasts a while
+        scrollBy({ top: r.top - innerHeight * PACE.scrollTo, behavior: "smooth" });
+      }
+    };
+    const step = () => {
+      if (index >= words.length) {
+        stop();
+        send({ kind: "turn", forward: true });
+        return;
+      }
+      show();
+      timer = setTimeout(() => {
+        index++;
+        step();
+      }, (60000 / wpm) * words[index].pause);
+    };
+
+    const start = () => {
+      if (timer !== null || !supported()) return;
+      if (!words) words = build();
+      if (!words.length) {
+        // Nothing to read here (a cover, an image): on to the next chapter.
+        send({ kind: "turn", forward: true });
+        return;
+      }
+      if (startAt) {
+        index = indexOf(startAt);
+        startAt = null;
+      } else {
+        // Carry on from the last word if it is still on screen.
+        const r = index < words.length ? rectOf(index) : null;
+        if (!r || r.bottom < 0 || r.top > innerHeight) index = firstVisible();
+      }
+      line = null;
+      step();
+    };
+    const stop = () => {
+      clearTimeout(timer);
+      timer = null;
+      clearMarks();
+    };
+    const pauseByReader = () => {
+      if (timer === null) return;
+      stop();
+      send({ kind: "pace_paused" });
+    };
+
+    return {
+      set(playing, newWpm) {
+        wpm = newWpm;
+        if (playing) start();
+        else stop();
+      },
+      // The layout changed (text size, width, window): measure lines again.
+      relayout() {
+        line = null;
+      },
+      userScrolled: pauseByReader,
+      // Any scroll the pacer didn't make: the reader is moving around.
+      scrolled() {
+        if (performance.now() > ownScrollUntil) pauseByReader();
+      },
+      // The app or the stylesheet is about to scroll: not the reader.
+      expectScroll() {
+        ownScrollUntil = performance.now() + 300;
+      },
+      clicked(range) {
+        startAt = range;
+        pauseByReader();
+      },
+    };
+  })();
+  addEventListener("wheel", pacer.userScrolled, { passive: true });
+  addEventListener("scroll", pacer.scrolled, { passive: true });
+  // A new layout scrolls to keep the place: that isn't the reader.
+  addEventListener("resize", () => {
+    pacer.expectScroll();
+    pacer.relayout();
+  });
+
   addEventListener("message", (e) => {
     const cmd = e.source === parent && e.data && e.data.justread;
     if (!cmd) return;
@@ -394,6 +613,10 @@
     }
     if (cmd.kind === "clear_lookup") {
       clearLookup();
+      return;
+    }
+    if (cmd.kind === "pace") {
+      pacer.set(cmd.playing, cmd.wpm);
       return;
     }
     if (cmd.kind === "track_sections") {
@@ -415,8 +638,10 @@
       link.rel = "stylesheet";
       link.href = "/__justread/reader.css?v=" + cmd.version;
       link.onload = () => {
+        pacer.expectScroll();
         if (old) old.remove();
         scrollTo(0, keep * maxScroll());
+        pacer.relayout();
       };
       if (old) old.after(link);
       else (document.head || root).appendChild(link);

@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 pub const MIN_FONT_SCALE: u16 = 60;
 pub const MAX_FONT_SCALE: u16 = 200;
 const FONT_SCALE_STEP: u16 = 10;
+/// Reading pacer speed, in words per minute.
+pub const MIN_PACE_WPM: u16 = 80;
+pub const MAX_PACE_WPM: u16 = 600;
+const PACE_WPM_STEP: u16 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -36,6 +40,8 @@ pub struct Preferences {
     pub line_width: LineWidth,
     /// Clicking a word (or selecting text) shows its translation.
     pub tap_to_translate: bool,
+    /// Speed of the reading pacer (the moving line and word highlight).
+    pub pace_wpm: u16,
 }
 
 impl Default for Preferences {
@@ -45,6 +51,7 @@ impl Default for Preferences {
             font_scale: 100,
             line_width: LineWidth::Medium,
             tap_to_translate: true,
+            pace_wpm: 200,
         }
     }
 }
@@ -70,6 +77,16 @@ impl Theme {
 
     /// Colors forced onto the chapter: (background, text, links, code
     /// background). `None` for Light, which keeps the book's own colors.
+    /// Reading pacer highlights: (current line, current word). Translucent
+    /// so the text stays readable; tinted to match the theme.
+    fn pace_colors(self) -> (&'static str, &'static str) {
+        match self {
+            Theme::Light => ("rgba(255, 213, 79, 0.25)", "rgba(255, 179, 0, 0.5)"),
+            Theme::Sepia => ("rgba(156, 74, 18, 0.1)", "rgba(156, 74, 18, 0.28)"),
+            Theme::Dark => ("rgba(138, 180, 248, 0.12)", "rgba(138, 180, 248, 0.35)"),
+        }
+    }
+
     fn palette(self) -> Option<Palette> {
         match self {
             Theme::Light => None,
@@ -143,10 +160,29 @@ impl Preferences {
         Preferences { font_scale, ..self }
     }
 
+    /// The pacer one step faster, up to the maximum.
+    pub fn faster(self) -> Self {
+        let pace_wpm = (self.pace_wpm + PACE_WPM_STEP).min(MAX_PACE_WPM);
+        Preferences { pace_wpm, ..self }
+    }
+
+    pub fn slower(self) -> Self {
+        let pace_wpm = self
+            .pace_wpm
+            .saturating_sub(PACE_WPM_STEP)
+            .max(MIN_PACE_WPM);
+        Preferences { pace_wpm, ..self }
+    }
+
     /// Clamp values from a hand-edited or older file into the valid range.
     pub fn sanitized(self) -> Self {
         let font_scale = self.font_scale.clamp(MIN_FONT_SCALE, MAX_FONT_SCALE);
-        Preferences { font_scale, ..self }
+        let pace_wpm = self.pace_wpm.clamp(MIN_PACE_WPM, MAX_PACE_WPM);
+        Preferences {
+            font_scale,
+            pace_wpm,
+            ..self
+        }
     }
 
     /// The stylesheet added to every chapter, after the book's own CSS.
@@ -170,6 +206,14 @@ impl Preferences {
         css += "::highlight(jr-search) { background-color: #ffd54f; color: #1c1c1e; }\n";
         // The word being translated: translucent, so it works on any theme.
         css += "::highlight(jr-lookup) { background-color: rgba(66, 133, 244, 0.3); }\n";
+        // The reading pacer: a soft band on the current line and a stronger
+        // mark, underlined like a pencil, on the current word.
+        let (line, word) = self.theme.pace_colors();
+        css += &format!(
+            "::highlight(jr-pace-line) {{ background-color: {line}; }}\n\
+             ::highlight(jr-pace-word) {{ background-color: {word}; \
+             text-decoration: underline 2px; text-underline-offset: 3px; }}\n"
+        );
 
         if self.font_scale != 100 {
             // Books size text in em/% almost everywhere, so scaling the root
@@ -235,6 +279,7 @@ mod tests {
             font_scale: 130,
             line_width: LineWidth::Full,
             tap_to_translate: false,
+            pace_wpm: 300,
         };
         let css = prefs.chapter_css();
         assert!(css.contains("font-size: 130% !important"));
@@ -261,6 +306,37 @@ mod tests {
     }
 
     #[test]
+    fn pace_stays_in_range() {
+        let mut prefs = Preferences::default();
+        for _ in 0..50 {
+            prefs = prefs.faster();
+        }
+        assert_eq!(prefs.pace_wpm, MAX_PACE_WPM);
+        for _ in 0..50 {
+            prefs = prefs.slower();
+        }
+        assert_eq!(prefs.pace_wpm, MIN_PACE_WPM);
+        let odd = Preferences {
+            pace_wpm: 0,
+            ..Preferences::default()
+        };
+        assert_eq!(odd.sanitized().pace_wpm, MIN_PACE_WPM);
+    }
+
+    #[test]
+    fn every_theme_styles_the_pacer() {
+        for theme in Theme::ALL {
+            let css = Preferences {
+                theme,
+                ..Preferences::default()
+            }
+            .chapter_css();
+            assert!(css.contains("::highlight(jr-pace-line)"), "{theme:?}");
+            assert!(css.contains("::highlight(jr-pace-word)"), "{theme:?}");
+        }
+    }
+
+    #[test]
     fn json_is_readable_and_missing_fields_get_defaults() -> Result<(), serde_json::Error> {
         let json = serde_json::to_string(&Preferences {
             theme: Theme::Sepia,
@@ -268,7 +344,7 @@ mod tests {
         })?;
         assert_eq!(
             json,
-            r#"{"theme":"sepia","font_scale":100,"line_width":"medium","tap_to_translate":true}"#
+            r#"{"theme":"sepia","font_scale":100,"line_width":"medium","tap_to_translate":true,"pace_wpm":200}"#
         );
         let partial: Preferences = serde_json::from_str(r#"{"theme":"dark"}"#)?;
         assert_eq!(

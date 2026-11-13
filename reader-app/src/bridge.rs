@@ -31,11 +31,18 @@ addEventListener("message", (e) => {
   }
   dioxus.send(msg);
 });
-// Ctrl/Cmd + "+"/"=", "-", "0" (text size), Ctrl/Cmd+F (search), Escape
-// and Alt+←/→ (back/forward); reader.js detects the same keys inside the
-// chapter.
+// Ctrl/Cmd + "+"/"=", "-", "0" (text size), Ctrl/Cmd+F (search), Escape,
+// Alt+←/→ (back/forward), Space and [ ] (reading pacer); reader.js detects
+// the same keys inside the chapter.
 const shortcut = (e) => {
   if (e.key === "Escape") return "escape";
+  // Space on a button clicks it, and in a text field types a space.
+  const typing = e.target.closest && e.target.closest("input, textarea, select, button");
+  if (!typing && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    if (e.key === " " && !e.shiftKey) return "pace_toggle";
+    if (e.key === "[") return "pace_slower";
+    if (e.key === "]") return "pace_faster";
+  }
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
     if (e.key === "ArrowLeft") return "back";
     if (e.key === "ArrowRight") return "forward";
@@ -137,6 +144,8 @@ pub enum PageEvent {
     },
     /// A click in the chapter that wasn't on a word.
     Dismiss,
+    /// The reading pacer stopped by itself (the reader scrolled or clicked).
+    PacePaused,
 }
 
 /// A rectangle in CSS pixels of the app window.
@@ -167,6 +176,11 @@ pub enum Shortcut {
     Back,
     /// Alt+→ or the mouse's forward button.
     Forward,
+    /// Space: start or pause the reading pacer.
+    PaceToggle,
+    /// `[` and `]`: change the pacer's speed.
+    PaceSlower,
+    PaceFaster,
 }
 
 /// Requests sent to the chapter; `kind` is what `reader.js` matches on.
@@ -202,6 +216,9 @@ enum Command {
     /// Zoom a PDF to `scale` times its fit-to-width size (EPUBs ignore it).
     #[serde(rename = "zoom")]
     Zoom { scale: f64 },
+    /// Run (or stop) the reading pacer at `wpm` words per minute.
+    #[serde(rename = "pace")]
+    Pace { playing: bool, wpm: u16 },
 }
 
 /// Handle to the bridge script. Cloning it gives another handle to the same
@@ -247,6 +264,10 @@ impl Bridge {
 
     pub fn zoom(&self, scale: f64) {
         self.send(Command::Zoom { scale });
+    }
+
+    pub fn pace(&self, playing: bool, wpm: u16) {
+        self.send(Command::Pace { playing, wpm });
     }
 
     pub fn clear_lookup(&self) {
@@ -295,6 +316,12 @@ mod tests {
         assert!(matches!(
             serde_json::from_str(r#"{"kind": "dismiss"}"#)?,
             PageEvent::Dismiss
+        ));
+        assert!(matches!(
+            serde_json::from_str(r#"{"kind": "shortcut", "action": "pace_toggle"}"#)?,
+            PageEvent::Shortcut {
+                action: Shortcut::PaceToggle
+            }
         ));
         Ok(())
     }

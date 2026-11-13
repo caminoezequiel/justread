@@ -9,7 +9,9 @@ use epub_core::{Book, BookKey, EpubError, Href, SearchHit, TocEntry};
 use crate::bridge::{Bridge, PageEvent, Shortcut};
 use crate::lookup::{Lookup, LookupPopup};
 use crate::pdf;
-use crate::preferences::{LineWidth, MAX_FONT_SCALE, MIN_FONT_SCALE, Preferences, Theme};
+use crate::preferences::{
+    LineWidth, MAX_FONT_SCALE, MAX_PACE_WPM, MIN_FONT_SCALE, MIN_PACE_WPM, Preferences, Theme,
+};
 use crate::protocol::{OpenBook, SharedBook, SharedStyle, Source};
 use crate::reader::{PageNumber, Reader};
 use crate::storage;
@@ -71,7 +73,21 @@ pub fn App() -> Element {
     let mut selected_hit = use_signal(|| None::<usize>);
     let style = use_context::<SharedStyle>();
     let mut lookup = use_signal(|| None::<Lookup>);
+    // Whether the reading pacer is running (not saved: it starts paused).
+    let mut pacing = use_signal(|| false);
     let bridge = use_hook(Bridge::start);
+
+    // Start or stop the reading pacer. PDFs have no pacer (yet).
+    let pace_bridge = bridge.clone();
+    let set_pacing = use_callback(move |on: bool| {
+        let is_pdf = opened_from
+            .peek()
+            .as_ref()
+            .is_some_and(|f| pdf::is_pdf(&f.path));
+        let on = on && !is_pdf;
+        pacing.set(on);
+        pace_bridge.pace(on, preferences.peek().pace_wpm);
+    });
 
     // Close the translation popup and unmark its word.
     let lookup_bridge = bridge.clone();
@@ -88,10 +104,14 @@ pub fn App() -> Element {
     let preferences_file = startup.preferences_file.clone();
     let restyle_bridge = bridge.clone();
     let set_preferences = use_callback(move |new: Preferences| {
-        if new == *preferences.peek() {
+        let old = *preferences.peek();
+        if new == old {
             return;
         }
         preferences.set(new);
+        if new.pace_wpm != old.pace_wpm {
+            restyle_bridge.pace(*pacing.peek(), new.pace_wpm);
+        }
         if !new.tap_to_translate {
             close_lookup(());
         }
@@ -119,6 +139,7 @@ pub fn App() -> Element {
                 storage::save_progress(store);
             }
             set_window_title(opened.contents.metadata.title.as_deref());
+            pacing.set(false);
             opened_from.set(Some(OpenedFrom { key, path }));
             search.set(None);
             search_query.set(String::new());
@@ -290,8 +311,19 @@ pub fn App() -> Element {
                         }
                         Shortcut::Back => go_history(true),
                         Shortcut::Forward => go_history(false),
+                        Shortcut::PaceToggle => set_pacing(!*pacing.peek()),
+                        Shortcut::PaceSlower => set_preferences(current.slower()),
+                        Shortcut::PaceFaster => set_preferences(current.faster()),
                         // The popup first: Esc closes one thing at a time.
                         Shortcut::Escape if lookup.peek().is_some() => close_lookup(()),
+                        // Then the settings panel or the search, then the pacer.
+                        Shortcut::Escape
+                            if *pacing.peek()
+                                && !*settings_open.peek()
+                                && search.peek().is_none() =>
+                        {
+                            set_pacing(false)
+                        }
                         Shortcut::Escape => {
                             settings_open.set(false);
                             if search.peek().is_some() {
@@ -320,6 +352,10 @@ pub fn App() -> Element {
                         close_lookup(());
                         continue;
                     }
+                    PageEvent::PacePaused => {
+                        pacing.set(false);
+                        continue;
+                    }
                     // Scrolling or changing chapter moves the word away from
                     // the popup.
                     _ => close_lookup(()),
@@ -328,9 +364,16 @@ pub fn App() -> Element {
                 let Some(r) = guard.as_mut() else {
                     continue;
                 };
+                // A new chapter is ready while the pacer runs: run it there too.
+                let mut resume_pacing = false;
                 let scroll = match event {
                     PageEvent::Turn { forward: true } => {
-                        r.next();
+                        if r.has_next() {
+                            r.next();
+                        } else if *pacing.peek() {
+                            // The pacer reached the end of the book.
+                            pacing.set(false);
+                        }
                         None
                     }
                     PageEvent::Turn { forward: false } => {
@@ -383,6 +426,7 @@ pub fn App() -> Element {
                             scroll_bridge.zoom(zoom_of(preferences.peek().font_scale));
                             scroll_bridge.track_sections(r.section_ids());
                             scroll_bridge.track_pages(r.page_ids());
+                            resume_pacing = *pacing.peek();
                         }
                         r.on_ready(&path)
                     }
@@ -391,12 +435,17 @@ pub fn App() -> Element {
                         None
                     }
                     // Handled above, before borrowing the reader.
-                    PageEvent::Shortcut { .. } | PageEvent::Lookup { .. } | PageEvent::Dismiss => {
-                        None
-                    }
+                    PageEvent::Shortcut { .. }
+                    | PageEvent::Lookup { .. }
+                    | PageEvent::Dismiss
+                    | PageEvent::PacePaused => None,
                 };
                 if let Some(scroll) = scroll {
                     scroll_bridge.scroll(scroll);
+                }
+                // After the scroll, so the pacer starts where the chapter opens.
+                if resume_pacing {
+                    scroll_bridge.pace(true, preferences.peek().pace_wpm);
                 }
             }
         }
@@ -423,6 +472,7 @@ pub fn App() -> Element {
     // while the event handlers below write to it.
     let snapshot = reader();
     let current_preferences = preferences();
+    let is_pdf = opened_from().is_some_and(|f| pdf::is_pdf(&f.path));
 
     rsx! {
         // `data-theme` switches the app's own colors (see style.css).
@@ -471,6 +521,14 @@ pub fn App() -> Element {
                                 }
                             },
                             "Next ›"
+                        }
+                    }
+                    if !is_pdf {
+                        Pacer {
+                            playing: pacing(),
+                            preferences: current_preferences,
+                            on_toggle: set_pacing,
+                            on_change: set_preferences,
                         }
                     }
                 }
@@ -601,6 +659,41 @@ fn BookHeader(reader: Reader) -> Element {
             }
             span { "{percent}%" }
             div { class: "bar", div { class: "fill", style: "width: {percent}%" } }
+        }
+    }
+}
+
+/// Reading pacer controls: start/pause and speed.
+#[component]
+fn Pacer(
+    playing: bool,
+    preferences: Preferences,
+    on_toggle: Callback<bool>,
+    on_change: Callback<Preferences>,
+) -> Element {
+    let p = preferences;
+    rsx! {
+        div { class: "pacer",
+            button {
+                class: "play",
+                title: if playing { "Pause the reading pacer (Space)" } else { "Start the reading pacer from the top of the screen or the clicked word (Space)" },
+                "aria-pressed": playing,
+                onclick: move |_| on_toggle.call(!playing),
+                if playing { "⏸" } else { "▶" }
+            }
+            button {
+                title: "Slower ([)",
+                disabled: p.pace_wpm <= MIN_PACE_WPM,
+                onclick: move |_| on_change.call(p.slower()),
+                "−"
+            }
+            span { class: "wpm", title: "Words per minute", "{p.pace_wpm} wpm" }
+            button {
+                title: "Faster (])",
+                disabled: p.pace_wpm >= MAX_PACE_WPM,
+                onclick: move |_| on_change.call(p.faster()),
+                "+"
+            }
         }
     }
 }
