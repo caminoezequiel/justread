@@ -65,6 +65,8 @@ pub fn App() -> Element {
     let mut store = use_signal(move || storage::load_progress(progress_file));
     let mut preferences = use_signal(|| startup.preferences);
     let mut settings_open = use_signal(|| false);
+    // The pacer's options menu (⚙ next to its controls in the header).
+    let mut pacer_menu_open = use_signal(|| false);
     // The chapter list on the left; hidden to give the text the full width.
     let mut sidebar_open = use_signal(|| true);
     let mut restyles = use_signal(|| 0_u64);
@@ -140,6 +142,7 @@ pub fn App() -> Element {
             }
             set_window_title(opened.contents.metadata.title.as_deref());
             pacing.set(false);
+            pacer_menu_open.set(false);
             opened_from.set(Some(OpenedFrom { key, path }));
             search.set(None);
             search_query.set(String::new());
@@ -323,16 +326,18 @@ pub fn App() -> Element {
                         Shortcut::PaceFaster => set_preferences(current.faster()),
                         // The popup first: Esc closes one thing at a time.
                         Shortcut::Escape if lookup.peek().is_some() => close_lookup(()),
-                        // Then the settings panel or the search, then the pacer.
+                        // Then a menu or the search, then the pacer.
                         Shortcut::Escape
                             if *pacing.peek()
                                 && !*settings_open.peek()
+                                && !*pacer_menu_open.peek()
                                 && search.peek().is_none() =>
                         {
                             set_pacing(false)
                         }
                         Shortcut::Escape => {
                             settings_open.set(false);
+                            pacer_menu_open.set(false);
                             if search.peek().is_some() {
                                 run_search(String::new());
                                 search_query.set(String::new());
@@ -536,6 +541,14 @@ pub fn App() -> Element {
                             preferences: current_preferences,
                             on_toggle: set_pacing,
                             on_change: set_preferences,
+                            menu_open: pacer_menu_open(),
+                            // One menu at a time: opening this one closes "Aa".
+                            on_menu: move |open: bool| {
+                                pacer_menu_open.set(open);
+                                if open {
+                                    settings_open.set(false);
+                                }
+                            },
                         }
                     }
                 }
@@ -543,7 +556,10 @@ pub fn App() -> Element {
                     class: "settings-toggle",
                     title: "Reading settings",
                     "aria-expanded": settings_open(),
-                    onclick: move |_| settings_open.toggle(),
+                    onclick: move |_| {
+                        settings_open.toggle();
+                        pacer_menu_open.set(false);
+                    },
                     "Aa"
                 }
                 if settings_open() {
@@ -670,13 +686,15 @@ fn BookHeader(reader: Reader) -> Element {
     }
 }
 
-/// Reading pacer controls: start/pause and speed.
+/// Reading pacer controls: start/pause, speed, and an options menu (⚙).
 #[component]
 fn Pacer(
     playing: bool,
     preferences: Preferences,
     on_toggle: Callback<bool>,
     on_change: Callback<Preferences>,
+    menu_open: bool,
+    on_menu: Callback<bool>,
 ) -> Element {
     let p = preferences;
     rsx! {
@@ -700,6 +718,41 @@ fn Pacer(
                 disabled: p.pace_wpm >= MAX_PACE_WPM,
                 onclick: move |_| on_change.call(p.faster()),
                 "+"
+            }
+            button {
+                class: "pacer-menu-toggle",
+                title: "Pacer options",
+                "aria-expanded": menu_open,
+                onclick: move |_| on_menu.call(!menu_open),
+                "⚙"
+            }
+            if menu_open {
+                div { class: "pacer-menu", role: "dialog", aria_label: "Reading pacer options",
+                    label {
+                        input {
+                            r#type: "checkbox",
+                            checked: p.pace_word,
+                            onchange: move |e| on_change.call(Preferences { pace_word: e.checked(), ..p }),
+                        }
+                        "Highlight word"
+                    }
+                    div { class: "row",
+                        span { class: "label", "Speed" }
+                        button {
+                            title: "Slower ([)",
+                            disabled: p.pace_wpm <= MIN_PACE_WPM,
+                            onclick: move |_| on_change.call(p.slower()),
+                            "−"
+                        }
+                        span { class: "wpm", "{p.pace_wpm} wpm" }
+                        button {
+                            title: "Faster (])",
+                            disabled: p.pace_wpm >= MAX_PACE_WPM,
+                            onclick: move |_| on_change.call(p.faster()),
+                            "+"
+                        }
+                    }
+                }
             }
         }
     }

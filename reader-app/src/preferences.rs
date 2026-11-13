@@ -42,6 +42,8 @@ pub struct Preferences {
     pub tap_to_translate: bool,
     /// Speed of the reading pacer (the moving line and word highlight).
     pub pace_wpm: u16,
+    /// The pacer also marks the current word, not just its line.
+    pub pace_word: bool,
 }
 
 impl Default for Preferences {
@@ -52,6 +54,7 @@ impl Default for Preferences {
             line_width: LineWidth::Medium,
             tap_to_translate: true,
             pace_wpm: 200,
+            pace_word: true,
         }
     }
 }
@@ -207,13 +210,16 @@ impl Preferences {
         // The word being translated: translucent, so it works on any theme.
         css += "::highlight(jr-lookup) { background-color: rgba(66, 133, 244, 0.3); }\n";
         // The reading pacer: a soft band on the current line and a stronger
-        // mark, underlined like a pencil, on the current word.
+        // mark, underlined like a pencil, on the current word. Without a rule
+        // the word's highlight still exists in reader.js but draws nothing.
         let (line, word) = self.theme.pace_colors();
-        css += &format!(
-            "::highlight(jr-pace-line) {{ background-color: {line}; }}\n\
-             ::highlight(jr-pace-word) {{ background-color: {word}; \
-             text-decoration: underline 2px; text-underline-offset: 3px; }}\n"
-        );
+        css += &format!("::highlight(jr-pace-line) {{ background-color: {line}; }}\n");
+        if self.pace_word {
+            css += &format!(
+                "::highlight(jr-pace-word) {{ background-color: {word}; \
+                 text-decoration: underline 2px; text-underline-offset: 3px; }}\n"
+            );
+        }
 
         if self.font_scale != 100 {
             // Books size text in em/% almost everywhere, so scaling the root
@@ -280,6 +286,7 @@ mod tests {
             line_width: LineWidth::Full,
             tap_to_translate: false,
             pace_wpm: 300,
+            pace_word: true,
         };
         let css = prefs.chapter_css();
         assert!(css.contains("font-size: 130% !important"));
@@ -337,6 +344,17 @@ mod tests {
     }
 
     #[test]
+    fn pace_word_highlight_can_be_turned_off() {
+        let css = Preferences {
+            pace_word: false,
+            ..Preferences::default()
+        }
+        .chapter_css();
+        assert!(css.contains("::highlight(jr-pace-line)"));
+        assert!(!css.contains("jr-pace-word"));
+    }
+
+    #[test]
     fn json_is_readable_and_missing_fields_get_defaults() -> Result<(), serde_json::Error> {
         let json = serde_json::to_string(&Preferences {
             theme: Theme::Sepia,
@@ -344,7 +362,7 @@ mod tests {
         })?;
         assert_eq!(
             json,
-            r#"{"theme":"sepia","font_scale":100,"line_width":"medium","tap_to_translate":true,"pace_wpm":200}"#
+            r#"{"theme":"sepia","font_scale":100,"line_width":"medium","tap_to_translate":true,"pace_wpm":200,"pace_word":true}"#
         );
         let partial: Preferences = serde_json::from_str(r#"{"theme":"dark"}"#)?;
         assert_eq!(
