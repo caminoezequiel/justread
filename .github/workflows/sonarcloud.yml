@@ -1,0 +1,37 @@
+# SonarQube Cloud (SonarCloud) analysis.
+# Needs the SONAR_TOKEN repository secret, and "Automatic Analysis" turned off
+# in SonarCloud (Administration > Analysis Method): CI and automatic analysis
+# can't both be on.
+
+name: SonarCloud analysis
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read # allows SonarCloud to decorate PRs with analysis results
+
+jobs:
+  Analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history: blame info and new-code detection
+
+      - name: Analyze with SonarCloud
+        # sonarqube-scan-action replaces the deprecated sonarcloud-github-action,
+        # whose bundled scanner runs on Java 17 (SonarCloud now requires 21+).
+        uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=caminoezequiel_justread
+            -Dsonar.organization=caminoezequiel
