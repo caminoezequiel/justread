@@ -43,6 +43,8 @@ Cargo workspace, edition 2024, two crates:
   `reader.js` (postMessage; the app never touches the chapter's DOM), `preferences.rs`,
   `dictionary.rs`/`lookup.rs` (tap to translate), `pdf.rs` (PDF.js viewer).
 - `search.rs` and `reader.js` implement the same text folding: change both together.
+- `reader-app/src/pdf.rs` builds `Contents`/`Metadata` by hand for PDFs: a new field on a
+  public `epub-core` struct must be filled in there too (the gate fails to compile otherwise).
 
 ## Conventions
 
@@ -56,6 +58,11 @@ Cargo workspace, edition 2024, two crates:
   (`#[cfg(test)] mod tests` in the same file) only for pure helpers. Test names are
   sentences in snake_case (`missing_resource_is_a_clear_error`). Never commit commercial or
   copyrighted books as fixtures.
+- The Gutenberg fixtures only have title, author and language. When a test needs data no
+  fixture has, add it to a hand-made one: edit `epub-core/tests/fixtures/hand-made/<name>/`,
+  run `sh epub-core/tests/fixtures/hand-made/build.sh`, update the fixtures `README.md` and
+  commit them with that book's `.epub`. The zip stores file times, so other `.epub`s can show
+  as modified without a real change: `git checkout` those instead of committing them.
 - Logic in `reader-app` goes in a UI-free module with unit tests (`reader.rs`, `history.rs`,
   `preferences.rs`); components stay thin.
 - Small modules, simple code, short comments explaining Rust concepts where they first appear.
