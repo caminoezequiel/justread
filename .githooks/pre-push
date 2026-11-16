@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Run the fast gate (same checks as CI) before anything leaves this machine.
+# Enable once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if ! scripts/gate.sh; then
+    echo >&2
+    echo "pre-push: the gate is red, nothing was pushed. Fix it and push again." >&2
+    exit 1
+fi

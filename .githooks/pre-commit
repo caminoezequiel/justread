@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Format and lint what is about to be committed.
+# Enable once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+# Staged .rs files (added, copied, modified, renamed). `mapfile` reads lines into an array.
+mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+[[ ${#files[@]} -eq 0 ]] && exit 0
+
+# Format check on the staged files only. It reads the working-tree copy, which
+# is what you see in the editor.
+if ! rustfmt --edition 2024 --check "${files[@]}"; then
+    echo >&2
+    echo "pre-commit: the files above are not formatted. Run 'cargo fmt --all', 'git add' them again and retry." >&2
+    exit 1
+fi
+
+# Clippy can't lint single files; it checks the workspace (incremental, a few seconds).
+if ! cargo clippy --workspace --all-targets --locked -- -D warnings; then
+    echo >&2
+    echo "pre-commit: clippy found problems (see above). Fix them and retry." >&2
+    exit 1
+fi
